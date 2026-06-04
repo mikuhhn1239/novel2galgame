@@ -1,5 +1,5 @@
 import { request } from './api'
-import type { SceneState, VNScript, FidelityReport, NarrativeParsingResult, AttributionResult, SegmentationResult } from '@novel2gal/core'
+import type { SceneState, VNScript, FidelityReport, NarrativeParsingResult, AttributionResult, SegmentationResult, VisualPromptResult } from '@novel2gal/core'
 
 export const sceneService = {
   listByChapter: (projectId: string, chapterId: string) =>
@@ -22,4 +22,13 @@ export const sceneService = {
 
   getSegmentationResult: (projectId: string, chapterId: string) =>
     request<SegmentationResult>(`/projects/${projectId}/chapters/${chapterId}/segmentation`),
+
+  getVisualPrompt: (projectId: string, sceneId: string) =>
+    request<VisualPromptResult>(`/projects/${projectId}/scenes/${sceneId}/visual-prompt`),
+
+  runVisualPrompt: (projectId: string, sceneId: string, body?: { styleTemplate?: string; model?: string }) =>
+    request<VisualPromptResult>(`/projects/${projectId}/scenes/${sceneId}/visual-prompt/run`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
 }
