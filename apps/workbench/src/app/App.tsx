@@ -11,6 +11,7 @@ import { VNScriptPage } from '@/pages/VNScriptPage'
 import { TasksPage } from '@/pages/TasksPage'
 import { ProjectSettingsPage } from '@/pages/ProjectSettingsPage'
 import { PreviewPage } from '@/pages/PreviewPage'
+import { VisualPromptPage } from '@/pages/VisualPromptPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,6 +35,7 @@ export function App() {
               <Route path="chapters" element={<ChaptersPage />} />
               <Route path="scenes/:chapterId" element={<ScenesPage />} />
               <Route path="script/:sceneId" element={<VNScriptPage />} />
+              <Route path="prompts" element={<VisualPromptPage />} />
               <Route path="tasks" element={<TasksPage />} />
               <Route path="settings" element={<ProjectSettingsPage />} />
               <Route path="preview" element={<PreviewPage />} />

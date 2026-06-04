@@ -9,6 +9,7 @@ import {
   writeSegmentationResult,
   writeVNScript,
   writeFidelityReport,
+  writeVisualPromptResult,
 } from "@novel2gal/storage";
 import {
   runStructureAgent,
@@ -17,6 +18,7 @@ import {
   runSceneSegmentationAgent,
   runVNMappingAgent,
   runFidelityReviewAgent,
+  runVisualPromptAgent,
 } from "@novel2gal/agents";
 import { v4 as uuid } from "uuid";
 import fs from "node:fs";
@@ -120,6 +122,31 @@ export async function runChapterPipeline(
     }
     writeFidelityReport(dataDir, project.projectId, scene.sceneId, fidelityResult.data);
     sceneResults.push({ sceneId: scene.sceneId, passed: fidelityResult.data.passed });
+
+    // Stage 6: Visual Prompt (optional, if autoRunVisualPrompt enabled)
+    if (project.config.autoRunVisualPrompt) {
+      onProgress?.("visual_prompt", `Generating visual prompts for scene ${scene.sceneId}`);
+      try {
+        const vpResult = await runVisualPromptAgent(
+          {
+            sceneId: scene.sceneId,
+            chapterId,
+            scene,
+            units: sceneUnits,
+            characters: attributionResult.data.characters,
+            styleTemplate: project.config.visualStyleTemplate,
+          },
+          provider,
+          model
+        );
+        if (vpResult.success && vpResult.data) {
+          writeVisualPromptResult(dataDir, project.projectId, scene.sceneId, vpResult.data);
+        }
+      } catch {
+        // Visual prompt is non-critical, log but continue
+        onProgress?.("visual_prompt", `Visual prompt failed for ${scene.sceneId}, skipping`);
+      }
+    }
   }
 
   return {

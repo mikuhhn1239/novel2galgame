@@ -72,6 +72,12 @@ importers:
       '@novel2gal/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@novel2gal/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
+      '@novel2gal/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.0(react@19.2.7)
@@ -160,6 +166,16 @@ importers:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+
+  packages/runtime:
+    dependencies:
+      '@novel2gal/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.7.3
 
   packages/storage:
     dependencies:

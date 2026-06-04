@@ -5,3 +5,4 @@ export * from "./attribution/index.js";
 export * from "./scene-segmentation/index.js";
 export * from "./vn-mapping/index.js";
 export * from "./fidelity-review/index.js";
+export * from "./visual-prompt/index.js";

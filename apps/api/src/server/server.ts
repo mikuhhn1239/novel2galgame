@@ -5,6 +5,7 @@ import { createProjectRoutes } from "../routes/projects.js";
 import { createSceneRoutes } from "../routes/scenes.js";
 import { createConfigRoutes } from "../routes/config.js";
 import { createProgressRoutes } from "../routes/progress.js";
+import { createImageRoutes } from "../routes/images.js";
 import type { LLMProvider } from "@novel2gal/providers";
 
 export function createServer(db: ReturnType<typeof createDatabase>, provider: LLMProvider | null) {
@@ -20,10 +21,13 @@ export function createServer(db: ReturnType<typeof createDatabase>, provider: LL
   app.use("/projects", createProjectRoutes(db, provider));
 
   // Scene, chapter result routes
-  app.use("/", createSceneRoutes(db));
+  app.use("/", createSceneRoutes(db, provider));
 
   // Config routes
   app.use("/config", createConfigRoutes(provider));
+
+  // Image generation routes
+  app.use("/images", createImageRoutes());
 
   // SSE progress routes
   app.use("/", createProgressRoutes());

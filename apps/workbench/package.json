@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@novel2gal/core": "workspace:*",
+    "@novel2gal/runtime": "workspace:*",
+    "@novel2gal/providers": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
