@@ -111,6 +111,32 @@ export async function runChapterPipeline(
   if (!segResult.success || !segResult.data) {
     throw new Error(`Scene segmentation failed: ${segResult.errorMessage}`);
   }
+
+  // Fix scene unitIds: LLM may generate inconsistent IDs, remap by order
+  const allUnitIds = new Set(attributionResult.data.units.map((u) => u.unitId));
+  const needsRemap = segResult.data.scenes.some(
+    (s) => s.unitIds.some((id) => !allUnitIds.has(id))
+  );
+  if (needsRemap) {
+    // Rebuild scene unit assignments from sceneUnitMap or order ranges
+    const units = attributionResult.data.units;
+    let offset = 0;
+    for (const scene of segResult.data.scenes) {
+      const count = scene.unitIds.length;
+      scene.unitIds = units.slice(offset, offset + count).map((u) => u.unitId);
+      if (scene.unitIds.length > 0) {
+        scene.startUnitId = scene.unitIds[0];
+        scene.endUnitId = scene.unitIds[scene.unitIds.length - 1];
+      }
+      offset += count;
+    }
+    // Update sceneUnitMap
+    segResult.data.sceneUnitMap = {};
+    for (const scene of segResult.data.scenes) {
+      segResult.data.sceneUnitMap[scene.sceneId] = scene.unitIds;
+    }
+  }
+
   writeSegmentationResult(dataDir, project.projectId, chapterId, segResult.data);
 
   // Stage 4+5: VN Mapping + Fidelity Review per scene (parallel with concurrency limit)

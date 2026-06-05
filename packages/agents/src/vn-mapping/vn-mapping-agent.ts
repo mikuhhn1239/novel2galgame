@@ -53,7 +53,7 @@ export async function runVNMappingAgent(
       const attr = u.attribution
         ? ` [speaker=${u.attribution.speakerId ?? "?"}]`
         : "";
-      return `[${u.order}] (${u.type}${attr}) ${u.originalText}`;
+      return `[${u.order}] (${u.type}${attr}) ${u.originalText ?? ""}`;
     })
     .join("\n");
 
@@ -86,7 +86,7 @@ ${unitsText}
     const dialogueSteps = (result.steps ?? []).filter(
       (s: VNStep) => s.type === "say" || s.type === "thought"
     );
-    const sourceTextLength = units.map((u) => u.originalText).join("").length;
+    const sourceTextLength = units.map((u) => u.originalText ?? "").join("").length;
     const scriptTextLength = dialogueSteps
       .map((s: VNStep) => ("text" in s ? String(s.text) : ""))
       .join("").length;
