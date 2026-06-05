@@ -24,6 +24,7 @@ import {
   readVisualPromptResult,
   writeConsistencyReport,
   readConsistencyReport,
+  writeChapterSource,
 } from "@novel2gal/storage";
 import { runStructureAgent, runConsistencyReviewAgent } from "@novel2gal/agents";
 import type { ChapterConsistencyData } from "@novel2gal/agents";
@@ -152,6 +153,14 @@ export function createProjectRoutes(db: Awaited<ReturnType<typeof createDatabase
         reviewDone: false,
         createdAt: now,
         updatedAt: now,
+      });
+
+      // Save chapter source text by slicing cleaned text with offsets
+      const chapterText = result.data.cleanedText.slice(ch.startOffset, ch.endOffset);
+      writeChapterSource(config.dataDir, param(req, "id"), ch.chapterId, {
+        chapterId: ch.chapterId,
+        title: ch.title,
+        text: chapterText,
       });
     }
 

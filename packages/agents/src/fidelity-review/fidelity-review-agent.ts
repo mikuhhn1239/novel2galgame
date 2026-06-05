@@ -62,7 +62,7 @@ export async function runFidelityReviewAgent(
     .join("\n");
 
   const originalText = originalUnits
-    .map((u) => `[${u.order}](${u.type}) ${u.originalText}`)
+    .map((u) => `[${u.order}](${u.type}) ${u.originalText ?? ""}`)
     .join("\n");
 
   const userPrompt = `请审核以下 VN 脚本的忠实度。

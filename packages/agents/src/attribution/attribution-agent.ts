@@ -44,7 +44,7 @@ export async function runAttributionAgent(
   }
 
   const unitsText = units
-    .map((u) => `[${u.order}] (${u.type}) ${u.originalText.slice(0, 200)}`)
+    .map((u) => `[${u.order}] (${u.type}) ${(u.originalText ?? "").slice(0, 200)}`)
     .join("\n");
 
   const userPrompt = `请为以下叙事单元标注角色归属。
