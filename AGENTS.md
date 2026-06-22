@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -44,7 +44,7 @@ Each agent has AI capability tier assignments:
 
 ## Design Documents
 
-All specs are in the `docs/` directory as `.txt` files. Key documents for implementation:
+All specs are at the repo root as `.txt` files. Key documents for implementation:
 
 | Document | When to read |
 |----------|-------------|
