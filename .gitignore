@@ -9,7 +9,7 @@ data/datasets/
 .env.local
 
 # Test novel dataset
-2/
+data/novel/
 
 # IDE / editor
 .vscode/

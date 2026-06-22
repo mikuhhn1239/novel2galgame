@@ -206,19 +206,122 @@ Book title: 《AI恋人》作者：妄初
 
 ---
 
-### Phase 2: 工作流与本地工作台 (待开发)
+### Phase 2: 工作流与本地工作台 ✅
 
-- [ ] apps/workbench 前端框架搭建
-- [ ] 项目列表 / 项目总览页面
-- [ ] 章节页面 / Scene 工作区
-- [ ] 任务与日志页面
+**整体状态:** 已完成
+**日期:** 2026-06-04
+**分支:** `phase2-workbench`
 
-### Phase 3: 预览播放器与视觉层 (待开发)
+#### 2.1 API 增强 ✅
 
-- [ ] packages/runtime VN 播放器
-- [ ] Visual Prompt Agent
-- [ ] Consistency Review Agent
-- [ ] 图片生成集成 (gpt-image-2)
+| 路由 | 功能 |
+|------|------|
+| GET/POST `/config/models` | 模型配置读写 |
+| POST `/config/test-connection` | 连接测试 |
+| GET `/projects/:id/scenes/:sceneId/script` | VN 脚本获取 |
+| GET `/projects/:id/scenes/:sceneId/fidelity` | 忠实性报告 |
+| GET `/projects/:id/chapters/:chapterId/narrative` | 解析结果 |
+| GET `/projects/:id/chapters/:chapterId/attribution` | 归因结果 |
+| GET `/projects/:id/chapters/:chapterId/segmentation` | 切分结果 |
+| GET `/projects/:id/scenes/:sceneId/visual-prompt` | 视觉提示词 |
+| POST `/projects/:id/scenes/:sceneId/visual-prompt/run` | 运行 Visual Prompt Agent |
+| POST `/images/generate` | 图像生成 |
+| GET `/images/providers` | 列出图像 provider |
+| SSE `/progress` | 进度推送 |
+
+#### 2.2 apps/workbench - React SPA 工作台 ✅
+
+| 页面 | 路由 | 状态 |
+|------|------|------|
+| 项目列表 | `/` | P0 完成 |
+| 新建项目 (3步向导) | `/projects/new` | P0 完成 |
+| 项目总览 | `/projects/:id/overview` | P0 完成 |
+| 章节管理 (三栏) | `/projects/:id/chapters` | P0 完成 |
+| 场景工作区 (三栏) | `/projects/:id/scenes/:chapterId` | P0 完成 |
+| 模型配置 | `/config` | P0 完成 |
+| 任务日志 | `/projects/:id/tasks` | P1 完成 |
+| VN 脚本 | `/projects/:id/script/:sceneId` | P1 占位 |
+| 视觉提示 | `/projects/:id/prompts` | P1 完成 (Phase 3) |
+| 预览播放 | `/projects/:id/preview` | P1 完成 (Phase 3) |
+| 项目设置 | `/projects/:id/settings` | P1 占位 |
+
+**技术栈:** React 19 + Vite 6 + Tailwind CSS 4 + Zustand + TanStack Query + lucide-react
+
+**构建产物:** 355KB JS + 23.5KB CSS, 无 warning
+
+---
+
+### Phase 3: 预览播放器与视觉层 ✅
+
+**整体状态:** 已完成
+**日期:** 2026-06-04
+**分支:** `phase2-workbench`
+
+#### 3.1 packages/runtime - VN 播放引擎 ✅
+
+| 模块 | 文件 | 内容 |
+|------|------|------|
+| 步骤执行器 | `src/step-engine/execute-step.ts` | 8 种 VNStep → RenderAction 映射 |
+| 渲染动作类型 | `src/step-engine/step-types.ts` | RenderAction 联合类型 (8 种) |
+| 播放控制器 | `src/player/player-controller.ts` | PlayerController 类 (play/pause/next/back/goto/loadScript) |
+| 播放状态机 | `src/player/player-state.ts` | PlayerState (idle/playing/paused/waiting/ended) |
+| 场景导航 | `src/player/navigation.ts` | getSceneList/findScriptByScene/findScriptByChapter |
+| 背景渲染 | `src/renderer/background-renderer.ts` | BackgroundState 解析 |
+| 角色渲染 | `src/renderer/character-renderer.ts` | show/hide 角色状态管理 |
+| 文本渲染 | `src/renderer/text-renderer.ts` | narration/dialogue/thought 三种文本模式 |
+| 转场渲染 | `src/renderer/transition-renderer.ts` | fade/cut/dissolve 效果 |
+
+**输出格式:** ESM (package.json `"type": "module"`)
+
+#### 3.2 Visual Prompt Agent ✅
+
+| 文件 | 内容 |
+|------|------|
+| `packages/agents/src/visual-prompt/visual-prompt-agent.ts` | 从叙事单元提取视觉证据, 生成 CharacterPromptPack + BackgroundPromptPack |
+| 支持风格模板 | school-romance-anime, urban-romance, fresh-japanese |
+| 证据校验 | 验证 quote 是否原文精确引用, 未匹配标记 `[unverified]` |
+| 输出 | VisualPromptResult (角色 prompt[] + 背景 prompt + 风格模板) |
+
+#### 3.3 图像生成 Provider ✅
+
+| Provider | 模型 | API 格式 |
+|----------|------|----------|
+| OpenAIImageProvider | gpt-image-1 | OpenAI Images API |
+| ZhipuImageProvider | cogview-4-250304 | OpenAI 兼容 (open.bigmodel.cn) |
+| SiliconFlowImageProvider | FLUX.1-schnell / SD3.5 | OpenAI 兼容 (api.siliconflow.cn) |
+
+**接口:** `ImageProvider` (generateImage + getSupportedModels + getDefaultSize)
+**自动保存:** 图像可自动保存到 `data/projects/{id}/preview/{sceneId}/`
+
+#### 3.4 Preview Player 页面 ✅
+
+- 16:9 VN 播放区域
+- 点击推进 / 自动播放 (可配置延迟)
+- 后退 / 下一步 / 跳转
+- 章节/场景导航 (左侧面板)
+- 角色立绘区域 (left/center/right 定位)
+- 文本框 (narration 斜体 / dialogue 带名称 / thought 紫色斜体)
+- Debug 模式 (显示当前 action JSON + 角色状态)
+- 信息面板 (步骤数、状态、场景 ID)
+
+#### 3.5 Visual Prompt 页面 ✅
+
+- 章节/场景选择 (左侧导航)
+- 角色提示词卡片 (可展开: 证据 → 保守补全 → 最终 Prompt)
+- 背景提示词展示
+- 风格模板选择 (3 种)
+- 一键生成/重新生成
+- Mutation 自动刷新缓存
+
+**构建验证:**
+- packages/runtime: tsc ✅
+- packages/providers: tsc ✅
+- packages/agents: tsc ✅
+- apps/api: tsc ✅ (含新路由)
+- apps/workbench: vite build ✅ (355KB JS, 23.5KB CSS)
+- 集成测试: 9/9 通过 (Health/CRUD/Structure/Chapters/Tasks)
+
+---
 
 ### Phase 4: MVP 收敛与验收 (待开发)
 

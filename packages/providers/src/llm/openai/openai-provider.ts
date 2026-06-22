@@ -30,11 +30,14 @@ export class OpenAIProvider implements LLMProvider {
 
     const choice = response.choices[0];
     if (!choice) {
-      throw new Error("No response from OpenAI");
+      throw new Error("No response from provider");
     }
+
+    const msg = choice.message as unknown as Record<string, unknown>;
 
     return {
       content: choice.message.content ?? "",
+      reasoning: typeof msg.reasoning_content === "string" ? msg.reasoning_content : undefined,
       model: response.model,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,
