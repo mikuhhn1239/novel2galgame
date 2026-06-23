@@ -56,7 +56,7 @@ export async function runSceneSegmentationAgent(
       const attr = u.attribution
         ? ` [speaker=${u.attribution.speakerId ?? "?"}]`
         : "";
-      return `[${u.order}] (${u.type}${attr}) ${u.originalText.slice(0, 150)}`;
+      return `[${u.order}] (${u.type}${attr}) ${(u.originalText ?? "").slice(0, 150)}`;
     })
     .join("\n");
 

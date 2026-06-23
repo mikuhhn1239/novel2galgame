@@ -36,7 +36,7 @@ export class ChapterRepository {
   create(chapter: ChapterState): void {
     this.db
       .prepare(
-        `INSERT INTO chapters (chapter_id, project_id, chapter_index, title, status,
+        `INSERT OR IGNORE INTO chapters (chapter_id, project_id, chapter_index, title, status,
          scene_count, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )

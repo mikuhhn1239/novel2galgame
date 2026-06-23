@@ -9,6 +9,7 @@ import {
   writeSegmentationResult,
   writeVNScript,
   writeFidelityReport,
+  writeVisualPromptResult,
 } from "@novel2gal/storage";
 import {
   runStructureAgent,
@@ -17,11 +18,32 @@ import {
   runSceneSegmentationAgent,
   runVNMappingAgent,
   runFidelityReviewAgent,
+  runVisualPromptAgent,
 } from "@novel2gal/agents";
 import { v4 as uuid } from "uuid";
 import fs from "node:fs";
 
 const now = () => new Date().toISOString();
+
+/** Run tasks with concurrency limit */
+async function parallelLimit<T>(
+  tasks: Array<() => Promise<T>>,
+  limit: number
+): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let nextIdx = 0;
+
+  async function runNext(): Promise<void> {
+    while (nextIdx < tasks.length) {
+      const idx = nextIdx++;
+      results[idx] = await tasks[idx]();
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => runNext());
+  await Promise.all(workers);
+  return results;
+}
 
 export function createDefaultConfig(): ProjectConfig {
   return {
@@ -89,12 +111,40 @@ export async function runChapterPipeline(
   if (!segResult.success || !segResult.data) {
     throw new Error(`Scene segmentation failed: ${segResult.errorMessage}`);
   }
+
+  // Fix scene unitIds: LLM may generate inconsistent IDs, remap by order
+  const allUnitIds = new Set(attributionResult.data.units.map((u) => u.unitId));
+  const needsRemap = segResult.data.scenes.some(
+    (s) => s.unitIds.some((id) => !allUnitIds.has(id))
+  );
+  if (needsRemap) {
+    // Rebuild scene unit assignments from sceneUnitMap or order ranges
+    const units = attributionResult.data.units;
+    let offset = 0;
+    for (const scene of segResult.data.scenes) {
+      const count = scene.unitIds.length;
+      scene.unitIds = units.slice(offset, offset + count).map((u) => u.unitId);
+      if (scene.unitIds.length > 0) {
+        scene.startUnitId = scene.unitIds[0];
+        scene.endUnitId = scene.unitIds[scene.unitIds.length - 1];
+      }
+      offset += count;
+    }
+    // Update sceneUnitMap
+    segResult.data.sceneUnitMap = {};
+    for (const scene of segResult.data.scenes) {
+      segResult.data.sceneUnitMap[scene.sceneId] = scene.unitIds;
+    }
+  }
+
   writeSegmentationResult(dataDir, project.projectId, chapterId, segResult.data);
 
-  // Stage 4+5: VN Mapping + Fidelity Review per scene
-  const sceneResults: Array<{ sceneId: string; passed: boolean }> = [];
-  for (const scene of segResult.data.scenes) {
-    const sceneUnits = attributionResult.data.units.filter((u) =>
+  // Stage 4+5: VN Mapping + Fidelity Review per scene (parallel with concurrency limit)
+  const sceneConcurrency = 3;
+  const attrUnits = attributionResult.data.units;
+  const attrCharacters = attributionResult.data.characters;
+  const sceneTasks = segResult.data.scenes.map((scene) => async () => {
+    const sceneUnits = attrUnits.filter((u) =>
       scene.unitIds.includes(u.unitId)
     );
 
@@ -119,8 +169,35 @@ export async function runChapterPipeline(
       throw new Error(`Fidelity review failed for ${scene.sceneId}: ${fidelityResult.errorMessage}`);
     }
     writeFidelityReport(dataDir, project.projectId, scene.sceneId, fidelityResult.data);
-    sceneResults.push({ sceneId: scene.sceneId, passed: fidelityResult.data.passed });
-  }
+
+    // Stage 6: Visual Prompt (optional, if autoRunVisualPrompt enabled)
+    if (project.config.autoRunVisualPrompt) {
+      onProgress?.("visual_prompt", `Generating visual prompts for scene ${scene.sceneId}`);
+      try {
+        const vpResult = await runVisualPromptAgent(
+          {
+            sceneId: scene.sceneId,
+            chapterId,
+            scene,
+            units: sceneUnits,
+            characters: attrCharacters,
+            styleTemplate: project.config.visualStyleTemplate,
+          },
+          provider,
+          model
+        );
+        if (vpResult.success && vpResult.data) {
+          writeVisualPromptResult(dataDir, project.projectId, scene.sceneId, vpResult.data);
+        }
+      } catch {
+        onProgress?.("visual_prompt", `Visual prompt failed for ${scene.sceneId}, skipping`);
+      }
+    }
+
+    return { sceneId: scene.sceneId, passed: fidelityResult.data.passed };
+  });
+
+  const sceneResults = await parallelLimit(sceneTasks, sceneConcurrency);
 
   return {
     chapterId,
