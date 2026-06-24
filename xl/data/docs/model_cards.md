@@ -3,80 +3,6 @@
 基座: Qwen3-8B-Novel-Base-SFT | 方法: LoRA r=64 α=128 | 硬件: A800 80GB
 
 ---
-language: zh
-license: apache-2.0
-library_name: transformers
-pipeline_tag: text-generation
-tags:
-- qwen3
-- chinese-novels
-- creative-writing
-- peft
-base_model: Qwen/Qwen3-8B-Instruct
----
-
-# Qwen3-8B Novel Base SFT
-
-基于 Qwen3-8B-Instruct 全参微调，用 669 本中文网络小说训练（约 7200 万字符）。
-
-覆盖类型：言情、耽美、都市言情、玄幻、网游。
-
-## 用途
-
-这是 **All Novel Can Be Galgame** 工作台的基座模型。
-用于学习中文小说的叙事风格，配合下游 LoRA adapter 执行三类 Agent 任务：
-
-- `mikuhhn1239/qwen3-8b-narrative-parsing-lora` — 叙事单元切分
-- `mikuhhn1239/qwen3-8b-scene-segmentation-lora` — 场景边界识别
-- `mikuhhn1239/qwen3-8b-attribution-assist-lora` — 角色归因
-
-## 加载
-
-```python
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-model = AutoModelForCausalLM.from_pretrained(
-    "mikuhhn1239/qwen3-8b-novel-base-sft",
-    torch_dtype="auto",
-    device_map="auto",
-)
-tokenizer = AutoTokenizer.from_pretrained(
-    "mikuhhn1239/qwen3-8b-novel-base-sft"
-)
-```
-
-4-bit 量化（适用于 8GB 显存）：
-
-```python
-from transformers import BitsAndBytesConfig
-
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype="float16",
-    bnb_4bit_quant_type="nf4",
-)
-model = AutoModelForCausalLM.from_pretrained(
-    "mikuhhn1239/qwen3-8b-novel-base-sft",
-    quantization_config=bnb_config,
-    device_map="auto",
-)
-```
-
-## 训练
-
-- 微调方式：全参数 SFT
-- 训练数据：72,573 条（continuation 36,092 + instruction 36,481）
-- 最大序列长度：4096
-- 学习率：5e-6，cosine scheduler
-- 硬件：8×A800 80GB
-- 框架：LLaMA-Factory
-
-## 限制
-
-- 仅支持中文输入
-- 训练数据以网络小说为主，非通用指令模型
-- 无安全对齐，不适用于敏感内容生成
----
 
 ## Agent 1: Narrative Type Classification ⭐
 
@@ -142,17 +68,6 @@ epoch: 5 | LR: 1e-4 | batch: 1×16(accum) | bf16 | max_length: 4096
 | v2 | 2.6% | 63.6% | 310 | 只分类，3ep, LR=2e-4 |
 | v3 / v3.1 | 2.6% | 63.6% | 310 | 5ep, LR=1e-4，max_new_tokens=256 截断 JSON |
 | v3.2 | 100% | 69.5% | 577 | 修复引号 `""`→`「」` + max_new_tokens→1024 + 扩标 |
-| **v4** ⭐ | **100%** | **72.8%** | 577 | 8 卡 DDP 重训，+3.3pp，各类型全面提升 |
-
-### v4 各类型准确率
-| 类型 | v3.2 | v4 | 变化 |
-|------|:---:|:---:|:---:|
-| narration | — | **82%** | 最强 |
-| dialogue | — | 70% | |
-| thought | — | 62% | |
-| action | — | 58% | |
-| scene_description | — | 54% | 最弱 |
-| **总体** | **69.5%** | **72.8%** | **+3.3pp** |
 
 ---
 
@@ -300,16 +215,16 @@ epoch: 5 | LR: 1e-4 | batch: 1×16(accum) | bf16 | max_length: 4096
 
 | Agent | 最佳版本 | 数据量(train) | JSON解析 | 关键指标 | 值 |
 |-------|:---:|:---:|:---:|---------|:---:|
-| narrative-type | v4 | 577 | 100% | 类型准确率 | **72.8%** |
-| scene-boundary | v4-590 | 590 | 100% | F1 | **30.5%** |
+| narrative-type | v3.2 | 577 | 100% | 类型准确率 | **69.5%** |
+| scene-boundary | v3.1 | 280 | 100% | F1 | **28.6%** |
 | attribution-best | v3.2 | 465 | 100% | 候选准确率 | **86.7%** |
 
 ### 版本演进总览
 
 | Agent | v1 | v2 | v3/v3.1 | v3.2 | 趋势 |
 |-------|:---:|:---:|:---:|:---:|------|
-| narrative-type (acc) | 25.0% | 63.6% | 63.6% | **72.8%** ⭐ | ↗ 持续提升 |
-| scene-boundary (F1) | 33.3% | 53.3% | 28.6% | **30.5%** ⭐⭐ | 标注质量定上限 |
+| narrative-type (acc) | 25.0% | 63.6% | 63.6% | **69.5%** ⭐ | ↗ 持续提升 |
+| scene-boundary (F1) | 33.3% | 53.3% | 28.6% | 20.0% | ↙ 困难任务 |
 | attribution-best (acc) | 14.3% | 33.3% | 43.3% | **86.7%** ⭐ | ↗ 大幅跃升 |
 
 ### 产物路径
@@ -317,8 +232,8 @@ epoch: 5 | LR: 1e-4 | batch: 1×16(accum) | bf16 | max_length: 4096
 | 产物 | 路径 | 大小 |
 |------|------|:---:|
 | Stage 1 基座 | `checkpoints/stage1-base-sft/final/` | 16GB |
-| narrative-type LoRA | `checkpoints/stage2-v4/narrative-type-classification/final/` | 682MB |
-| scene-boundary LoRA | `checkpoints/stage2-v4/v4_best_adapter/` | 682MB |
+| narrative-type LoRA | `checkpoints/stage2-v3.2/narrative-type-classification/final/` | 682MB |
+| scene-boundary LoRA | `checkpoints/stage2-v3.1/scene-boundary-detection/final/` | 682MB |
 | attribution-best LoRA | `checkpoints/stage2-v3.2/attribution-best-candidate/final/` | 682MB |
 
 > 三个 LoRA 共用同一个 Stage1 基座。推理时加载基座 + 对应 LoRA adapter 即可。
