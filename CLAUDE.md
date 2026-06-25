@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **All Novel Can Be Galgame** -- a locally-deployable AI workbench that converts Chinese romance-oriented txt novels into playable visual novel (galgame) experiences. It is a narrative-to-VN converter, not a creative rewriting tool: the output must faithfully preserve plot, dialogue, character relationships, and emotional tone from the source text.
 
-**Status:** Pre-implementation. The repo contains 10 Chinese-language design specification documents (`.txt` files at root). No source code exists yet.
+**Status:** Phase 1-4 complete. Full pipeline tested end-to-end with Agnes AI. SFT model trained (Qwen3-8B + 3 LoRA agents). Design docs moved to `docs/`.
 
 ## Planned Architecture
 

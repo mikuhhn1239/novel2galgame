@@ -323,11 +323,174 @@ Book title: 《AI恋人》作者：妄初
 
 ---
 
-### Phase 4: MVP 收敛与验收 (待开发)
+### Phase 4: MVP 收敛与验收 ✅
 
-- [ ] 评测框架集成
-- [ ] 性能优化
-- [ ] MVP 验收指标达标
+**整体状态:** 已完成
+**日期:** 2026-06-04 ~ 2026-06-05
+**分支:** `phase2-workbench`
+
+#### 4.1 Consistency Review Agent ✅
+
+| 文件 | 内容 |
+|------|------|
+| `packages/agents/src/consistency-review/consistency-review-agent.ts` | L2 跨章节一致性审查 Agent |
+| 检查项 | character_name_conflict, alias_conflict, background_label_conflict, scene_label_conflict, prompt_style_drift |
+| API 路由 | POST `/projects/:id/consistency/run`, GET `/projects/:id/consistency` |
+| 存储 | `consistency_report.json` 写入项目根目录 |
+
+#### 4.2 评测框架 (packages/evaluation) ✅
+
+| 模块 | 文件 | 内容 |
+|------|------|------|
+| 通用指标 | `src/metrics/common.ts` | precision, recall, F1, macro F1, boundary F1 |
+| Structure | `src/metrics/structure-metrics.ts` | 章节识别 F1, 特殊章节, 置信度 |
+| Narrative Parsing | `src/metrics/narrative-metrics.ts` | macro F1, per-class F1 (5 类) |
+| Attribution | `src/metrics/attribution-metrics.ts` | speaker/actor/thinker 准确率, alias 解析 |
+| Scene Segmentation | `src/metrics/scene-metrics.ts` | boundary F1, 过切/欠切率 |
+| VN Mapping | `src/metrics/vn-mapping-metrics.ts` | 对话保留率, 非原文添加率, schema 合法性 |
+| Fidelity Review | `src/metrics/fidelity-metrics.ts` | 问题召回率, 严重问题召回率, 精确率 |
+| System | `src/metrics/system-metrics.ts` | 章节完成率, 预览可用率, 失败率 |
+| Gold Set | `src/gold-set.ts` | Gold/Validation/Stress 数据集加载 |
+| Eval Runner | `src/eval-runner.ts` | 全流程评测, 结果保存, 回归对比 |
+
+**评测数据目录:** `data/evaluation/{gold,validation,stress,results}/`
+
+#### 4.3 性能优化 ✅
+
+- 章节内 scene 并行处理 (concurrency limit = 3)
+- `parallelLimit` 工具函数, 避免 LLM 并发过高
+
+#### 4.4 全量构建验证 ✅
+
+```
+packages/core        ✅ tsc
+packages/providers   ✅ tsc
+packages/storage     ✅ tsc
+packages/agents      ✅ tsc (含 consistency-review)
+packages/runtime     ✅ tsc
+packages/evaluation  ✅ tsc
+apps/api             ✅ tsc
+apps/workbench       ✅ vite build (355KB JS, 23.5KB CSS)
+```
+
+---
+
+### Phase 5: 管线测试与模型集成 (进行中)
+
+**整体状态:** 进行中
+**日期:** 2026-06-05 ~ 2026-06-25
+**分支:** `phase2-workbench` + `main`
+
+#### 5.1 管线鲁棒性修复 ✅
+
+**日期:** 2026-06-05
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 1 | `originalText` 安全访问 | `u.originalText.slice()` → `(u.originalText ?? "").slice()` (4 个 agent) |
+| 2 | Scene unitId 不一致 | LLM 生成的 unitId 和实际不匹配, order-based 重映射 |
+| 3 | 截断 JSON | `repairJson()` 函数处理免费 API 的 token 截断 |
+| 4 | 章节源文本保存 | structure 路由中自动切分并保存各章 source.txt |
+| 5 | FetchLLMProvider | 基于 node:https 的 provider, 不依赖 openai npm 包 |
+| 6 | IPv6 问题 | Windows 上 node fetch/socket 连接失败, 强制 IPv4 |
+| 7 | INSERT OR IGNORE | chapterRepo 防止重复章节主键冲突 |
+
+#### 5.2 LLM 输出字段名 Normalization ✅
+
+**日期:** 2026-06-22
+
+**问题:** 不同 LLM 返回的 JSON 字段名不一致 (如 Agnes AI 返回 `id`/`text` 而非 `unitId`/`originalText`)
+
+**修复:**
+- 新增 `packages/agents/src/shared/normalize.ts`
+- `normalizeAttributionUnits()` — 映射 `id`→`unitId`, `text`→`originalText`, 包装 loose fields 到 `attribution`
+- `normalizeVNSteps()` — 映射 `id`→`stepId`, 确保必需字段
+- Attribution Agent 和 VN Mapping Agent 的 prompt 中明确字段名 + normalize 兜底
+
+#### 5.3 LLM Provider 增强 ✅
+
+**日期:** 2026-06-22 ~ 2026-06-24
+
+| 改动 | 说明 |
+|------|------|
+| `LLMResponse.reasoning` | 新增可选 reasoning 字段, 支持推理模型 |
+| `OpenAIProvider` | 提取 `reasoning_content` 到 `reasoning` 字段 |
+| `FetchLLMProvider` | HTTP/HTTPS 自适应, markdown 代码块清理 |
+| `chatJson` | 自动剥离 ` ```json``` ` 包裹 |
+
+#### 5.4 多模型 Profile 切换 ✅
+
+**日期:** 2026-06-22
+
+| 功能 | 说明 |
+|------|------|
+| ModelProfile 类型 | `name`, `type` (cloud/local), `baseUrl`, `apiKey`, `defaultModel` |
+| API 路由 | GET/POST `/config/profiles`, POST `/config/profiles/:name/activate` |
+| 运行时切换 | 切换 profile 时重建 provider 实例, 不需重启服务 |
+| 预设 profiles | `agnes-cloud` (Agnes AI), `qwen3-8b-local` (本地 ollama) |
+
+#### 5.5 本地模型部署 (WSL2) 🔄
+
+**日期:** 2026-06-24
+
+| 项目 | 状态 | 说明 |
+|------|------|------|
+| WSL2 Ubuntu 22.04 | ✅ | 已安装, CUDA 直通可用 (RTX 4060 8GB) |
+| vLLM | ❌ | WSL2 bitsandbytes UVA 不可用 |
+| transformers + bitsandbytes | 🔄 | 4-bit 量化可用 (6GB 显存), 但 CUDA 后端不稳定 |
+| SFT 模型下载 | ✅ | 基座 16GB + 3 个 LoRA 各 682MB |
+| Flask API 服务 | ✅ | `scripts/serve-sft.py`, localhost:8000 |
+| 端口转发 | ✅ | `netsh interface portproxy` 8000 → WSL |
+
+**已知问题:**
+- bitsandbytes CUDA 在 WSL2 不稳定 (`Error unknown error at line 471`)
+- 推理偶尔卡死导致管线超时
+- 待解决: 换 llama.cpp + GGUF 量化
+
+#### 5.6 Agnes AI 全管线测试 ✅
+
+**日期:** 2026-06-22 ~ 2026-06-25
+
+**Provider:** Agnes AI `agnes-2.0-flash` (免费)
+
+| 阶段 | 状态 | 说明 |
+|------|------|------|
+| Structure (L0) | ✅ | 10 章, confidence 0.95 |
+| Narrative Parsing (L2) | ✅ | 正常返回 units |
+| Attribution (L2) | ✅ | 字段名 normalization 后正确 |
+| Scene Segmentation (L2) | ✅ | 2-5 场景/章 |
+| VN Mapping (L2) | ✅ | 7-20 steps/场景 |
+| Fidelity Review (L2) | ✅ | 检测到真实问题 (编码乱码, 内容遗漏) |
+| Consistency Review (L2) | ✅ | 2 章数据, 无一致性问题 (符合预期) |
+
+**已知问题:**
+- Agnes AI 免费 tier 偶尔超时或返回截断 JSON, 需重试机制
+- GBK 编码小说有乱码问题 (结构 agent 编码检测不够准确)
+- `characters: []` — attribution 结果未正确提取角色列表
+
+#### 5.7 SFT 模型训练 ✅
+
+**日期:** 2026-06-10 ~ 2026-06-24
+**硬件:** 8× NVIDIA A800-SXM4-80GB (Kubernetes Pod)
+
+**Stage 1: 基座 SFT**
+- 72,573 条小说续写数据 (continuation + instruction)
+- 4×A800 + DeepSpeed ZeRO-2, seq_len=2048, 2 epochs
+- Loss: 3.36 → 2.47, 耗时 ~9h
+- 产物: `mikuhhn1239/qwen3-8b-novel-base-sft` (16GB)
+
+**Stage 2: 三个 Agent LoRA**
+
+| Agent | 最佳版本 | 指标 | 训练数据 |
+|-------|---------|------|---------|
+| narrative-type | v4 | 准确率 **72.8%** | 577 条 |
+| attribution-best | v3.2 | 准确率 **86.7%** | 465 条 |
+| scene-boundary | v4-590 | F1 **30.5%** | 590 条 (DeepSeek 重标注) |
+
+**核心经验:**
+1. 短 system prompt 是硬要求 (95字 vs 735字 → ~8pp F1 差距)
+2. 不要加 reasons/推理链 (模型学会套模板)
+3. 8B + SFT 场景边界天花板 ≈ 30% F1 (需 GRPO/DPO 突破)
 
 ---
 
