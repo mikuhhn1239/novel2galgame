@@ -11,18 +11,27 @@ txt 小说 → Structure → Narrative Parsing → Attribution → Scene Segment
     → VN Mapping + Visual Prompt (并行) → Fidelity Review → Consistency Review → 可玩预览
 ```
 
-9 个 Agent 组成的流水线，每章自动执行：
+9 个 Agent 组成的流水线，每章自动执行。前 3 个 Agent 支持本地 SFT 模型和云端 API 切换。
 
-| 阶段 | 能力层级 | 说明 |
-|------|---------|------|
-| Structure | L0 规则 | 章节识别、文本清洗 |
-| Narrative Parsing | L2 语义 | 叙事单元分类 (对话/叙述/心理/动作/场景) |
-| Attribution | L2 语义 | 角色归属标注 |
-| Scene Segmentation | L2 语义 | 场景切分 |
-| VN Mapping | L2 语义 | 叙事单元 → VN 脚本步骤 |
-| Visual Prompt | L2 语义 | 生成立绘/背景提示词 |
-| Fidelity Review | L2 语义 | 忠实度审核 |
-| Consistency Review | L2 语义 | 跨章节一致性检查 |
+## 本地模型 (Qwen3-8B SFT)
+
+基于 Qwen3-8B-Instruct 全参微调，用 669 本中文网络小说训练（约 7200 万字符）。配合 3 个 LoRA adapter 执行专项 Agent 任务。
+
+| 模型 | HuggingFace | 任务 | 指标 |
+|------|-------------|------|------|
+| Base SFT | [mikuhhn1239/qwen3-8b-novel-base-sft](https://huggingface.co/mikuhhn1239/qwen3-8b-novel-base-sft) | 小说叙事风格基座 | - |
+| Narrative LoRA | [mikuhhn1239/qwen3-8b-narrative-parsing-lora](https://huggingface.co/mikuhhn1239/qwen3-8b-narrative-parsing-lora) | 叙事单元分类 | 72.8% 准确率 |
+| Attribution LoRA | [mikuhhn1239/qwen3-8b-attribution-assist-lora](https://huggingface.co/mikuhhn1239/qwen3-8b-attribution-assist-lora) | 角色归因 | 86.7% 准确率 |
+| Scene LoRA | [mikuhhn1239/qwen3-8b-scene-segmentation-lora](https://huggingface.co/mikuhhn1239/qwen3-8b-scene-segmentation-lora) | 场景边界检测 | 30.5% F1 |
+
+**训练硬件:** 8× NVIDIA A800-80GB | **方法:** LoRA r=64 α=128 | **详细文档:** [model_cards.md](docs/model_cards.md)
+
+## 云端模型
+
+| 模型 | 用途 | 价格 |
+|------|------|------|
+| [Agnes AI agnes-2.0-flash](https://agnes-ai.com) | LLM 推理 (VN Mapping, Fidelity, Consistency) | 免费 |
+| [Agnes AI agnes-image-2.1-flash](https://agnes-ai.com) | 文生图/图生图 | $0.003/张 |
 
 ## 技术栈
 
@@ -30,13 +39,14 @@ txt 小说 → Structure → Narrative Parsing → Attribution → Scene Segment
 - **后端:** Node.js + Express + SQLite (better-sqlite3)
 - **前端:** React 19 + Vite 6 + Tailwind CSS 4 + Zustand + TanStack Query
 - **VN 引擎:** 自研步骤执行器，8 种步骤类型
-- **LLM:** 兼容 OpenAI API 的任意模型 (已验证: NVIDIA/Kimi, MiMo v2.5, Agnes AI)
+- **本地推理:** transformers + bitsandbytes 4-bit (WSL2) + Flask API
+- **Per-Agent 路由:** 前 3 个 Agent 可切换本地/云端模型
 
 ## 项目结构
 
 ```
 apps/
-  api/          Node.js REST API
+  api/          Node.js REST API (per-agent 路由)
   workbench/    React SPA 工作台
 packages/
   core/         领域模型与 TypeScript 接口
@@ -45,8 +55,12 @@ packages/
   providers/    LLM + 图像生成 Provider
   storage/      SQLite 索引 + 文件系统存储
   evaluation/   评测框架
-docs/           设计文档 (中文)
-data/           项目数据、评测数据集
+scripts/
+  serve-sft.py  本地 SFT 模型服务 (LoRA 热切换)
+  download-models.py  模型下载脚本
+docs/           设计文档 + 训练日志 + 模型卡
+data/           项目数据、测试小说、评测数据集
+xl/             训练代码、数据集、评测结果
 ```
 
 ## 快速开始
@@ -69,23 +83,47 @@ cd apps/api && npx tsx src/index.ts
 cd apps/workbench && pnpm dev
 ```
 
+### 本地模型启动 (可选)
+
+```bash
+# 下载模型 (需要 HuggingFace token)
+pip install huggingface_hub
+python scripts/download-models.py
+
+# 启动本地模型服务 (WSL2 + CUDA)
+python scripts/serve-sft.py
+# API: http://localhost:8000/v1
+```
+
 ## API 示例
 
 ```bash
 # 创建项目
-curl -X POST http://localhost:3001/projects \
+curl -X POST http://localhost:3002/projects \
   -H "Content-Type: application/json" \
   -d '{"title": "我的小说"}'
 
 # 导入小说
-curl -X POST http://localhost:3001/projects/{id}/import \
+curl -X POST http://localhost:3002/projects/{id}/import \
   -F "file=@novel.txt"
 
 # 运行结构识别
-curl -X POST http://localhost:3001/projects/{id}/structure/run
+curl -X POST http://localhost:3002/projects/{id}/structure/run
 
-# 运行章节管线 (完整管线: 解析→归属→切分→VN映射→忠实度审核)
-curl -X POST http://localhost:3001/projects/{id}/chapters/{chapterId}/run
+# 运行章节管线 (云端 Agnes AI)
+curl -X POST http://localhost:3002/projects/{id}/chapters/{chapterId}/run \
+  -H "Content-Type: application/json" \
+  -d '{"model": "agnes-2.0-flash"}'
+
+# 运行章节管线 (本地 SFT + 云端混合)
+curl -X POST http://localhost:3002/projects/{id}/chapters/{chapterId}/run \
+  -H "Content-Type: application/json" \
+  -d '{"model": "agnes-2.0-flash", "localBaseUrl": "http://localhost:8000/v1", "localModel": "narrative"}'
+
+# 运行一致性审查
+curl -X POST http://localhost:3002/projects/{id}/consistency/run \
+  -H "Content-Type: application/json" \
+  -d '{"model": "agnes-2.0-flash"}'
 ```
 
 ## VN 脚本格式
@@ -110,9 +148,11 @@ curl -X POST http://localhost:3001/projects/{id}/chapters/{chapterId}/run
 - 三级状态机: Project (9态) / Chapter (8态) / Scene (6态)
 - 混合存储: SQLite 索引 + 文件系统内容
 
-## 设计文档
+## 训练详情
 
-详见 [`docs/`](docs/) 目录，包含 10 份中文设计规格文档。
+完整的训练过程、调试经验和版本演进记录见：
+- [TRAINING_LOG.md](docs/TRAINING_LOG.md) — 训练操作与调试记录
+- [model_cards.md](docs/model_cards.md) — 模型卡与加载方式
 
 ## License
 

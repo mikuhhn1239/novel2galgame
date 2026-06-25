@@ -429,23 +429,30 @@ apps/workbench       ✅ vite build (355KB JS, 23.5KB CSS)
 | 运行时切换 | 切换 profile 时重建 provider 实例, 不需重启服务 |
 | 预设 profiles | `agnes-cloud` (Agnes AI), `qwen3-8b-local` (本地 ollama) |
 
-#### 5.5 本地模型部署 (WSL2) 🔄
+#### 5.5 本地模型部署 (WSL2) ✅
 
-**日期:** 2026-06-24
+**日期:** 2026-06-24 ~ 2026-06-25
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
 | WSL2 Ubuntu 22.04 | ✅ | 已安装, CUDA 直通可用 (RTX 4060 8GB) |
-| vLLM | ❌ | WSL2 bitsandbytes UVA 不可用 |
-| transformers + bitsandbytes | 🔄 | 4-bit 量化可用 (6GB 显存), 但 CUDA 后端不稳定 |
+| vLLM | ❌ | WSL2 UVA 不可用, 所有 workaround 无效 |
+| transformers + bitsandbytes | ✅ | 4-bit NF4 量化 (6.0GB 基座 + 1.1GB LoRA) |
 | SFT 模型下载 | ✅ | 基座 16GB + 3 个 LoRA 各 682MB |
 | Flask API 服务 | ✅ | `scripts/serve-sft.py`, localhost:8000 |
+| LoRA 热切换 | ✅ | 单 PeftModel + PeftModel.from_pretrained(), 按需加载/卸载 |
+| thinking 标签修复 | ✅ | 去除 `<think></think>` 避免推理时间暴增 (20s→5min) |
 | 端口转发 | ✅ | `netsh interface portproxy` 8000 → WSL |
 
+**serve-sft.py 架构:**
+- 基座模型 4-bit NF4 加载 (6.0GB)
+- 3 个 LoRA adapter 按需加载 (单个 ~1.1GB, 切换时卸载旧的)
+- 模型名称映射: `narrative`→narrative-type-lora, `attribution`→attribution-best-lora, `scene`→scene-boundary-lora
+- 支持 OpenAI 兼容 API (`/v1/chat/completions`)
+
 **已知问题:**
-- bitsandbytes CUDA 在 WSL2 不稳定 (`Error unknown error at line 471`)
-- 推理偶尔卡死导致管线超时
-- 待解决: 换 llama.cpp + GGUF 量化
+- Node.js API 进程 → WSL2 HTTP 连接有问题 (请求到达但响应丢失)
+- 需要管理员权限设置端口转发
 
 #### 5.6 Agnes AI 全管线测试 ✅
 
@@ -491,6 +498,40 @@ apps/workbench       ✅ vite build (355KB JS, 23.5KB CSS)
 1. 短 system prompt 是硬要求 (95字 vs 735字 → ~8pp F1 差距)
 2. 不要加 reasons/推理链 (模型学会套模板)
 3. 8B + SFT 场景边界天花板 ≈ 30% F1 (需 GRPO/DPO 突破)
+
+#### 5.8 Per-Agent 模型路由 ✅
+
+**日期:** 2026-06-25
+
+| 功能 | 说明 |
+|------|------|
+| `AgentModelConfig` 接口 | 每个 agent 可指定独立的 provider + model |
+| `resolveAgent()` | 按 agent 名称选择 provider, 回退到默认 |
+| API 参数 | `localBaseUrl` + `localModel` 指定本地模型服务 |
+| 路由策略 | 前 3 个 agent (narrative/attribution/segmentation) → 本地 SFT, 其余 → 云端 |
+
+**代码改动:**
+- `apps/api/src/orchestrator/chapter-pipeline.ts` — AgentModelConfig + resolveAgent()
+- `apps/api/src/routes/projects.ts` — localBaseUrl/localModel 参数支持
+- 所有 agent 调用通过 resolveAgent() 获取 provider
+
+**状态:** 代码已就绪, Node.js→WSL2 网络问题待解决后可切换本地模型
+
+#### 5.9 Consistency Review 测试 ✅
+
+**日期:** 2026-06-25
+
+**测试环境:** Agnes AI `agnes-2.0-flash`, 《爱恨迟暮一叶秋》(10章)
+
+| 阶段 | 状态 | 说明 |
+|------|------|------|
+| 第 1 章 Pipeline | ✅ | 2 场景, fidelity review 完成 |
+| 第 3 章 Pipeline | ✅ | 2 场景, fidelity review 完成 |
+| Consistency Review | ✅ | 2 章数据, 无一致性问题 (符合预期) |
+
+**已知问题:**
+- 第 2 章因 Agnes AI 偶发超时未完成
+- `characters: []` 空数组问题待排查
 
 ---
 
