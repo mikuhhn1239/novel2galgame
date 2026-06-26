@@ -143,9 +143,11 @@ export function createProjectRoutes(db: Awaited<ReturnType<typeof createDatabase
 
     for (const ch of result.data.chapters) {
       const now = new Date().toISOString();
+      const projectId = param(req, "id");
+      const chapterId = `${projectId}:${ch.chapterId}`;
       chapterRepo.create({
-        chapterId: ch.chapterId,
-        projectId: param(req, "id"),
+        chapterId,
+        projectId,
         index: ch.index,
         title: ch.title,
         status: "raw",
@@ -161,8 +163,8 @@ export function createProjectRoutes(db: Awaited<ReturnType<typeof createDatabase
 
       // Save chapter source text by slicing cleaned text with offsets
       const chapterText = result.data.cleanedText.slice(ch.startOffset, ch.endOffset);
-      writeChapterSource(config.dataDir, param(req, "id"), ch.chapterId, {
-        chapterId: ch.chapterId,
+      writeChapterSource(config.dataDir, projectId, chapterId, {
+        chapterId,
         title: ch.title,
         text: chapterText,
       });
@@ -242,7 +244,8 @@ export function createProjectRoutes(db: Awaited<ReturnType<typeof createDatabase
       const result = await runChapterPipeline(
         config.dataDir, project, chapter.index, chapter.title, chapterText, provider, model,
         undefined, agentModels,
-        (scene, sceneIndex) => { try { sceneRepo.create(scene, sceneIndex); } catch {} }
+        (scene, sceneIndex) => { try { sceneRepo.create(scene, sceneIndex); } catch {} },
+        chapter.chapterId
       );
       chapterRepo.updateStatus(param(req, "chapterId"), "chapter_ready");
       res.json(result);
