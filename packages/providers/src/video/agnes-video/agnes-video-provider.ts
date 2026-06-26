@@ -124,7 +124,6 @@ export class AgnesVideoProvider implements VideoProvider {
           "Authorization": `Bearer ${this.apiKey}`,
           ...(body ? { "Content-Length": Buffer.byteLength(body) } : {}),
         },
-        family: 4,
       }, (res) => {
         let responseBody = "";
         res.on("data", (chunk) => { responseBody += chunk; });

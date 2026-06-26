@@ -1,13 +1,9 @@
 import "dotenv/config";
-import dns from "node:dns";
 import { createDatabase } from "@novel2gal/storage";
 import { FetchLLMProvider } from "@novel2gal/providers";
 import type { LLMProvider } from "@novel2gal/providers";
 import { createServer } from "./server/server.js";
 import { config, getActiveProfile } from "./config/index.js";
-
-// Force IPv4 to avoid UND_ERR_SOCKET on Windows with IPv6
-dns.setDefaultResultOrder("ipv4first");
 
 const db = createDatabase(config.dataDir);
 
