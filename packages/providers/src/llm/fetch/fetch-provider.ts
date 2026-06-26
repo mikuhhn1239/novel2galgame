@@ -23,7 +23,7 @@ export class FetchLLMProvider implements LLMProvider {
     this.baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
     this.apiKey = config.apiKey;
     this.defaultModel = config.defaultModel ?? "gpt-4o";
-    this.agent = new https.Agent({ family: 4 }); // Force IPv4 (HTTPS only)
+    this.agent = new https.Agent();
   }
 
   private request(path: string, body: object): Promise<any> {
