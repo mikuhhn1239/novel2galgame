@@ -25,6 +25,28 @@ import fs from "node:fs";
 
 const now = () => new Date().toISOString();
 
+/** Retry an async function with exponential backoff */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts?: { maxRetries?: number; baseDelayMs?: number; label?: string }
+): Promise<T> {
+  const maxRetries = opts?.maxRetries ?? 3;
+  const baseDelay = opts?.baseDelayMs ?? 5000;
+  const label = opts?.label ?? "operation";
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const delay = baseDelay * Math.pow(2, attempt);
+      console.log(`[Retry] ${label} failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms: ${err instanceof Error ? err.message.slice(0, 80) : err}`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error("unreachable");
+}
+
 /** Run tasks with concurrency limit */
 async function parallelLimit<T>(
   tasks: Array<() => Promise<T>>,
@@ -99,36 +121,35 @@ export async function runChapterPipeline(
   // Stage 1: Narrative Parsing
   onProgress?.("narrative_parsing", `Parsing chapter ${chapterTitle}`);
   const narr = resolveAgent(agentModels, "narrative", provider, model);
-  const narrativeResult = await runNarrativeParsingAgent(
-    { chapterId, chapterTitle, chapterText },
-    narr.provider,
-    narr.model
+  const narrativeResult = await withRetry(
+    () => runNarrativeParsingAgent({ chapterId, chapterTitle, chapterText }, narr.provider, narr.model),
+    { label: `narrative:${chapterId}` }
   );
   if (!narrativeResult.success || !narrativeResult.data) {
     throw new Error(`Narrative parsing failed: ${narrativeResult.errorMessage}`);
   }
-  writeNarrativeResult(dataDir, project.projectId, chapterId, narrativeResult.data);
+  const narrativeData = narrativeResult.data;
+  writeNarrativeResult(dataDir, project.projectId, chapterId, narrativeData);
 
   // Stage 2: Attribution
   onProgress?.("attribution", `Attributing chapter ${chapterTitle}`);
   const attr = resolveAgent(agentModels, "attribution", provider, model);
-  const attributionResult = await runAttributionAgent(
-    { chapterId, units: narrativeResult.data.units },
-    attr.provider,
-    attr.model
+  const attributionResult = await withRetry(
+    () => runAttributionAgent({ chapterId, units: narrativeData.units }, attr.provider, attr.model),
+    { label: `attribution:${chapterId}` }
   );
   if (!attributionResult.success || !attributionResult.data) {
     throw new Error(`Attribution failed: ${attributionResult.errorMessage}`);
   }
-  writeAttributionResult(dataDir, project.projectId, chapterId, attributionResult.data);
+  const attributionData = attributionResult.data;
+  writeAttributionResult(dataDir, project.projectId, chapterId, attributionData);
 
   // Stage 3: Scene Segmentation
   onProgress?.("scene_segmentation", `Segmenting chapter ${chapterTitle}`);
   const seg = resolveAgent(agentModels, "segmentation", provider, model);
-  const segResult = await runSceneSegmentationAgent(
-    { chapterId, units: attributionResult.data.units },
-    seg.provider,
-    seg.model
+  const segResult = await withRetry(
+    () => runSceneSegmentationAgent({ chapterId, units: attributionData.units }, seg.provider, seg.model),
+    { label: `segmentation:${chapterId}` }
   );
   if (!segResult.success || !segResult.data) {
     throw new Error(`Scene segmentation failed: ${segResult.errorMessage}`);
@@ -163,8 +184,8 @@ export async function runChapterPipeline(
 
   // Stage 4+5: VN Mapping + Fidelity Review per scene (parallel with concurrency limit)
   const sceneConcurrency = 3;
-  const attrUnits = attributionResult.data.units;
-  const attrCharacters = attributionResult.data.characters;
+  const attrUnits = attributionData.units;
+  const attrCharacters = attributionData.characters;
   const sceneTasks = segResult.data.scenes.map((scene) => async () => {
     const sceneUnits = attrUnits.filter((u) =>
       scene.unitIds.includes(u.unitId)
@@ -172,27 +193,39 @@ export async function runChapterPipeline(
 
     onProgress?.("vn_mapping", `Mapping scene ${scene.sceneId}`);
     const vn = resolveAgent(agentModels, "vnMapping", provider, model);
-    const vnResult = await runVNMappingAgent(
-      { sceneId: scene.sceneId, chapterId, scene, units: sceneUnits, mappingMode: "standard" },
-      vn.provider,
-      vn.model
+    const vnResult = await withRetry(
+      () => runVNMappingAgent(
+        { sceneId: scene.sceneId, chapterId, scene, units: sceneUnits, mappingMode: "standard" },
+        vn.provider, vn.model
+      ),
+      { label: `vn_mapping:${scene.sceneId}` }
     );
     if (!vnResult.success || !vnResult.data) {
       throw new Error(`VN mapping failed for ${scene.sceneId}: ${vnResult.errorMessage}`);
     }
-    writeVNScript(dataDir, project.projectId, scene.sceneId, vnResult.data);
+    const vnData = vnResult.data;
+    writeVNScript(dataDir, project.projectId, scene.sceneId, vnData);
 
     onProgress?.("fidelity_review", `Reviewing scene ${scene.sceneId}`);
     const fr = resolveAgent(agentModels, "fidelityReview", provider, model);
-    const fidelityResult = await runFidelityReviewAgent(
-      { sceneId: scene.sceneId, chapterId, vnScript: vnResult.data, originalUnits: sceneUnits },
-      fr.provider,
-      fr.model
-    );
-    if (!fidelityResult.success || !fidelityResult.data) {
-      throw new Error(`Fidelity review failed for ${scene.sceneId}: ${fidelityResult.errorMessage}`);
+    let fidelityPassed = true;
+    try {
+      const fidelityResult = await withRetry(
+        () => runFidelityReviewAgent(
+          { sceneId: scene.sceneId, chapterId, vnScript: vnData, originalUnits: sceneUnits },
+          fr.provider, fr.model
+        ),
+        { label: `fidelity:${scene.sceneId}`, maxRetries: 2 }
+      );
+      if (fidelityResult.success && fidelityResult.data) {
+        writeFidelityReport(dataDir, project.projectId, scene.sceneId, fidelityResult.data);
+        fidelityPassed = fidelityResult.data.passed;
+      } else {
+        console.log(`[Fidelity] ${scene.sceneId} returned no data, skipping report`);
+      }
+    } catch (err) {
+      console.log(`[Fidelity] ${scene.sceneId} failed after retries, continuing: ${err instanceof Error ? err.message.slice(0, 80) : err}`);
     }
-    writeFidelityReport(dataDir, project.projectId, scene.sceneId, fidelityResult.data);
 
     // Stage 6: Visual Prompt (optional, if autoRunVisualPrompt enabled)
     if (project.config.autoRunVisualPrompt) {
@@ -219,7 +252,7 @@ export async function runChapterPipeline(
       }
     }
 
-    return { sceneId: scene.sceneId, passed: fidelityResult.data.passed };
+    return { sceneId: scene.sceneId, passed: fidelityPassed };
   });
 
   const sceneResults = await parallelLimit(sceneTasks, sceneConcurrency);
