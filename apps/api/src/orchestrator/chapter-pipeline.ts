@@ -108,9 +108,10 @@ export async function runChapterPipeline(
   model: string,
   onProgress?: (stage: string, message: string) => void,
   agentModels?: AgentModelConfig,
-  onSceneCreated?: (scene: SceneState, sceneIndex: number) => void
+  onSceneCreated?: (scene: SceneState, sceneIndex: number) => void,
+  existingChapterId?: string
 ) {
-  const chapterId = `chapter_${String(chapterIndex + 1).padStart(4, "0")}`;
+  const chapterId = existingChapterId ?? `${project.projectId}:chapter_${String(chapterIndex + 1).padStart(4, "0")}`;
 
   // Save chapter source
   writeChapterSource(dataDir, project.projectId, chapterId, {
