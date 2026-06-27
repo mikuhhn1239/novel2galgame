@@ -18,20 +18,30 @@ export function validateIR(data: unknown): ValidationResult {
   const errors: ValidationError[] = [];
   const warnings: string[] = [];
 
-  // 1. Schema validation
+  // 1. Schema validation (lenient: unknown step types become warnings)
   const result = VNScriptSchema.safeParse(data);
   if (!result.success) {
     for (const issue of result.error.issues) {
+      const isUnknownType = issue.message.includes("Invalid discriminator value");
       errors.push({
         path: issue.path.join("."),
         message: issue.message,
-        severity: "error",
+        severity: isUnknownType ? "warning" : "error",
       });
     }
-    return { valid: false, errors, warnings };
+    // If only warnings, still valid
+    const realErrors = errors.filter((e) => e.severity === "error");
+    if (realErrors.length > 0) {
+      return { valid: false, errors, warnings };
+    }
   }
 
-  const script = result.data;
+  const script = result.data as any;
+
+  // If Zod parse failed completely (no data), skip deeper checks
+  if (!script?.steps) {
+    return { valid: errors.length === 0, errors, warnings };
+  }
 
   // 2. Check for duplicate stepIds
   const stepIds = new Set<string>();
