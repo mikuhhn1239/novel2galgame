@@ -46,7 +46,23 @@ export class RenPyBuilder implements GameBuilder {
       const assetFiles = generatePlaceholders(input.scripts, input.characters, input.outputDir);
       generatedFiles.push(...assetFiles);
 
-      // 5. Generate README
+      // 5. Copy Chinese font for text rendering
+      const fontDir = path.join(gameDir, "fonts");
+      fs.mkdirSync(fontDir, { recursive: true });
+      // Try simhei.ttf first (single TTF, better Ren'Py compat), fall back to msyh.ttc
+      const fontCandidates = ["C:/Windows/Fonts/simhei.ttf", "C:/Windows/Fonts/msyh.ttc"];
+      let fontName = "fonts/simhei.ttf";
+      for (const src of fontCandidates) {
+        if (fs.existsSync(src)) {
+          const ext = path.extname(src);
+          fontName = `fonts/simhei${ext}`;
+          fs.copyFileSync(src, path.join(fontDir, `simhei${ext}`));
+          generatedFiles.push(path.join(fontDir, `simhei${ext}`));
+          break;
+        }
+      }
+
+      // 6. Generate README
       const readme = this.generateReadme(title, input);
       const readmePath = path.join(input.outputDir, "README.md");
       fs.writeFileSync(readmePath, readme, "utf-8");

@@ -6,8 +6,8 @@ export function generateCharacters(characters: CharacterRef[]): string {
   lines.push("# Auto-generated character definitions");
   lines.push("");
 
-  // Default narrator
-  lines.push("define narrator = Character(None, what_italic=True)");
+  // Default narrator with Chinese font
+  lines.push('define narrator = Character(None, what_italic=True, what_font="fonts/simhei.ttf")');
   lines.push("");
 
   for (const char of characters) {
@@ -15,7 +15,7 @@ export function generateCharacters(characters: CharacterRef[]): string {
     const name = char.canonicalName || char.characterId;
     const color = charColor(char.characterId);
 
-    lines.push(`define ${id} = Character("${name}", color="${color}")`);
+    lines.push(`define ${id} = Character("${name}", color="${color}", what_font="fonts/simhei.ttf")`);
   }
 
   lines.push("");
@@ -39,14 +39,27 @@ export function generateCharacterImages(characters: CharacterRef[]): string {
   return lines.join("\n");
 }
 
-/** Generate a deterministic color for a character based on their ID */
+/** Generate a deterministic hex color for a character based on their ID */
 function charColor(charId: string): string {
   let hash = 0;
   for (let i = 0; i < charId.length; i++) {
     hash = ((hash << 5) - hash + charId.charCodeAt(i)) | 0;
   }
   const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 70%, 65%)`;
+  // HSL to hex conversion
+  const s = 0.7, l = 0.65;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (hue < 60) { r = c; g = x; }
+  else if (hue < 120) { r = x; g = c; }
+  else if (hue < 180) { g = c; b = x; }
+  else if (hue < 240) { g = x; b = c; }
+  else if (hue < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
 function sanitizeId(id: string): string {
