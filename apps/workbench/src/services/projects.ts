@@ -60,4 +60,10 @@ export const projectService = {
     request<{ success: boolean; generated: string[]; errors: string[] }>(`/projects/${id}/export/generate-assets`, {
       method: 'POST',
     }),
+
+  autoExport: (id: string, body?: { model?: string; maxChapters?: number; generateAssets?: boolean }) =>
+    request<{ status: string; projectId: string }>(`/projects/${id}/auto-export`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
 }
