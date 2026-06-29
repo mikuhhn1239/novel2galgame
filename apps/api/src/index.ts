@@ -1,5 +1,9 @@
 import "dotenv/config";
+import dns from "node:dns";
 import { createDatabase } from "@novel2gal/storage";
+
+// Force IPv4 DNS resolution to avoid proxy/VPN IPv6 TLS issues
+dns.setDefaultResultOrder("ipv4first");
 import { FetchLLMProvider } from "@novel2gal/providers";
 import type { LLMProvider } from "@novel2gal/providers";
 import { createServer } from "./server/server.js";

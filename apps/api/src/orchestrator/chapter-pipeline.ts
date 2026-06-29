@@ -20,12 +20,44 @@ import {
   runFidelityReviewAgent,
   runVisualPromptAgent,
 } from "@novel2gal/agents";
+import type { AgentResult } from "@novel2gal/agents";
 import { v4 as uuid } from "uuid";
 import fs from "node:fs";
 
 const now = () => new Date().toISOString();
 
-/** Retry an async function with exponential backoff */
+/** Wrap an agent call: throw on recoverable failure so withRetry catches it */
+function retryable<T>(fn: () => Promise<AgentResult<T>>): () => Promise<T> {
+  return async () => {
+    const result = await fn();
+    if (!result.success || !result.data) {
+      // Socket hang up, timeout, 5xx → recoverable (retry)
+      // Bad schema, missing fields → hard (no retry)
+      const isRetryable = result.failureLevel !== "hard" && (
+        result.failureLevel === "recoverable" ||
+        result.errorMessage?.includes("socket hang up") ||
+        result.errorMessage?.includes("timeout") ||
+        result.errorMessage?.includes("ETIMEDOUT") ||
+        result.errorMessage?.includes("ECONNRESET") ||
+        result.errorMessage?.includes("ECONNREFUSED") ||
+        result.errorMessage?.includes("LLM API error 5") ||
+        result.errorMessage?.includes("LLM returned invalid structure") ||
+        result.errorMessage?.includes("is not valid JSON") ||
+        result.errorMessage?.includes("Unterminated") ||
+        result.errorMessage?.includes("truncated") ||
+        result.errorMessage?.includes("Expected ','") ||
+        result.errorMessage?.includes("JSON")
+      );
+      const err = new Error(`${result.failureLevel ?? "unknown"}: ${result.errorMessage}`);
+      (err as any).retryable = isRetryable;
+      throw err;
+    }
+    return result.data;
+  };
+}
+
+/** Retry an async function with exponential backoff.
+ *  Only retries on transient errors (network, timeout, 5xx, recoverable agent failures). */
 async function withRetry<T>(
   fn: () => Promise<T>,
   opts?: { maxRetries?: number; baseDelayMs?: number; label?: string }
@@ -38,9 +70,27 @@ async function withRetry<T>(
     try {
       return await fn();
     } catch (err) {
-      if (attempt === maxRetries) throw err;
+      const isRetryable = (err as any)?.retryable === true;
+      const msg = err instanceof Error ? err.message : String(err);
+      const isTransient = isRetryable ||
+        msg.includes("socket hang up") ||
+        msg.includes("socket disconnected") ||
+        msg.includes("TLS connection") ||
+        msg.includes("timeout") ||
+        msg.includes("ETIMEDOUT") ||
+        msg.includes("ECONNRESET") ||
+        msg.includes("ECONNREFUSED") ||
+        msg.includes("ENOTFOUND") ||
+        msg.includes("EPIPE") ||
+        msg.includes("JSON") ||
+        msg.includes("Unterminated");
+
+      console.log(`[Retry] ${label} attempt ${attempt + 1}/${maxRetries + 1}: isRetryable=${isRetryable}, isTransient=${isTransient}, msg=${msg.slice(0, 120)}`);
+
+      if (attempt === maxRetries || !isTransient) throw err;
+
       const delay = baseDelay * Math.pow(2, attempt);
-      console.log(`[Retry] ${label} failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms: ${err instanceof Error ? err.message.slice(0, 80) : err}`);
+      console.log(`[Retry] ${label} retrying in ${delay}ms...`);
       await new Promise((r) => setTimeout(r, delay));
     }
   }
@@ -123,50 +173,39 @@ export async function runChapterPipeline(
   // Stage 1: Narrative Parsing
   onProgress?.("narrative_parsing", `Parsing chapter ${chapterTitle}`);
   const narr = resolveAgent(agentModels, "narrative", provider, model);
-  const narrativeResult = await withRetry(
-    () => runNarrativeParsingAgent({ chapterId, chapterTitle, chapterText }, narr.provider, narr.model),
+  const narrativeData = await withRetry(
+    retryable(() => runNarrativeParsingAgent({ chapterId, chapterTitle, chapterText }, narr.provider, narr.model)),
     { label: `narrative:${chapterId}` }
   );
-  if (!narrativeResult.success || !narrativeResult.data) {
-    throw new Error(`Narrative parsing failed: ${narrativeResult.errorMessage}`);
-  }
-  const narrativeData = narrativeResult.data;
   writeNarrativeResult(dataDir, project.projectId, chapterId, narrativeData);
 
   // Stage 2: Attribution
   onProgress?.("attribution", `Attributing chapter ${chapterTitle}`);
   const attr = resolveAgent(agentModels, "attribution", provider, model);
-  const attributionResult = await withRetry(
-    () => runAttributionAgent({ chapterId, units: narrativeData.units }, attr.provider, attr.model),
+  const attributionData = await withRetry(
+    retryable(() => runAttributionAgent({ chapterId, units: narrativeData.units }, attr.provider, attr.model)),
     { label: `attribution:${chapterId}` }
   );
-  if (!attributionResult.success || !attributionResult.data) {
-    throw new Error(`Attribution failed: ${attributionResult.errorMessage}`);
-  }
-  const attributionData = attributionResult.data;
   writeAttributionResult(dataDir, project.projectId, chapterId, attributionData);
 
   // Stage 3: Scene Segmentation
   onProgress?.("scene_segmentation", `Segmenting chapter ${chapterTitle}`);
   const seg = resolveAgent(agentModels, "segmentation", provider, model);
   const segResult = await withRetry(
-    () => runSceneSegmentationAgent({ chapterId, units: attributionData.units }, seg.provider, seg.model),
+    retryable(() => runSceneSegmentationAgent({ chapterId, units: attributionData.units }, seg.provider, seg.model)),
     { label: `segmentation:${chapterId}` }
   );
-  if (!segResult.success || !segResult.data) {
-    throw new Error(`Scene segmentation failed: ${segResult.errorMessage}`);
-  }
 
   // Fix scene unitIds: LLM may generate inconsistent IDs, remap by order
-  const allUnitIds = new Set(attributionResult.data.units.map((u) => u.unitId));
-  const needsRemap = segResult.data.scenes.some(
+  const allUnitIds = new Set(attributionData.units.map((u) => u.unitId));
+  const needsRemap = segResult.scenes.some(
     (s) => s.unitIds.some((id) => !allUnitIds.has(id))
   );
   if (needsRemap) {
     // Rebuild scene unit assignments from sceneUnitMap or order ranges
-    const units = attributionResult.data.units;
+    const units = attributionData.units;
     let offset = 0;
-    for (const scene of segResult.data.scenes) {
+    for (const scene of segResult.scenes) {
       const count = scene.unitIds.length;
       scene.unitIds = units.slice(offset, offset + count).map((u) => u.unitId);
       if (scene.unitIds.length > 0) {
@@ -176,17 +215,17 @@ export async function runChapterPipeline(
       offset += count;
     }
     // Update sceneUnitMap
-    segResult.data.sceneUnitMap = {};
-    for (const scene of segResult.data.scenes) {
-      segResult.data.sceneUnitMap[scene.sceneId] = scene.unitIds;
+    segResult.sceneUnitMap = {};
+    for (const scene of segResult.scenes) {
+      segResult.sceneUnitMap[scene.sceneId] = scene.unitIds;
     }
   }
 
-  writeSegmentationResult(dataDir, project.projectId, chapterId, segResult.data);
+  writeSegmentationResult(dataDir, project.projectId, chapterId, segResult);
 
   // Register scenes in database
-  for (let i = 0; i < segResult.data.scenes.length; i++) {
-    const scene = segResult.data.scenes[i];
+  for (let i = 0; i < segResult.scenes.length; i++) {
+    const scene = segResult.scenes[i];
     onSceneCreated?.({
       sceneId: scene.sceneId,
       chapterId,
@@ -200,43 +239,35 @@ export async function runChapterPipeline(
   const sceneConcurrency = 3;
   const attrUnits = attributionData.units;
   const attrCharacters = attributionData.characters;
-  const sceneTasks = segResult.data.scenes.map((scene) => async () => {
+  const sceneTasks = segResult.scenes.map((scene) => async () => {
     const sceneUnits = attrUnits.filter((u) =>
       scene.unitIds.includes(u.unitId)
     );
 
     onProgress?.("vn_mapping", `Mapping scene ${scene.sceneId}`);
     const vn = resolveAgent(agentModels, "vnMapping", provider, model);
-    const vnResult = await withRetry(
-      () => runVNMappingAgent(
+    const vnData = await withRetry(
+      retryable(() => runVNMappingAgent(
         { sceneId: scene.sceneId, chapterId, scene, units: sceneUnits, mappingMode: "standard" },
         vn.provider, vn.model
-      ),
+      )),
       { label: `vn_mapping:${scene.sceneId}` }
     );
-    if (!vnResult.success || !vnResult.data) {
-      throw new Error(`VN mapping failed for ${scene.sceneId}: ${vnResult.errorMessage}`);
-    }
-    const vnData = vnResult.data;
     writeVNScript(dataDir, project.projectId, scene.sceneId, vnData);
 
     onProgress?.("fidelity_review", `Reviewing scene ${scene.sceneId}`);
     const fr = resolveAgent(agentModels, "fidelityReview", provider, model);
     let fidelityPassed = true;
     try {
-      const fidelityResult = await withRetry(
-        () => runFidelityReviewAgent(
+      const fidelityData = await withRetry(
+        retryable(() => runFidelityReviewAgent(
           { sceneId: scene.sceneId, chapterId, vnScript: vnData, originalUnits: sceneUnits },
           fr.provider, fr.model
-        ),
+        )),
         { label: `fidelity:${scene.sceneId}`, maxRetries: 2 }
       );
-      if (fidelityResult.success && fidelityResult.data) {
-        writeFidelityReport(dataDir, project.projectId, scene.sceneId, fidelityResult.data);
-        fidelityPassed = fidelityResult.data.passed;
-      } else {
-        console.log(`[Fidelity] ${scene.sceneId} returned no data, skipping report`);
-      }
+      writeFidelityReport(dataDir, project.projectId, scene.sceneId, fidelityData);
+      fidelityPassed = fidelityData.passed;
     } catch (err) {
       console.log(`[Fidelity] ${scene.sceneId} failed after retries, continuing: ${err instanceof Error ? err.message.slice(0, 80) : err}`);
     }
@@ -273,8 +304,8 @@ export async function runChapterPipeline(
 
   return {
     chapterId,
-    sceneCount: segResult.data.scenes.length,
+    sceneCount: segResult.scenes.length,
     fidelityResults: sceneResults,
-    characters: attributionResult.data.characters,
+    characters: attributionData.characters,
   };
 }
