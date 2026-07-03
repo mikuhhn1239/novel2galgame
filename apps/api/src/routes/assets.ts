@@ -82,7 +82,7 @@ export function createAssetRoutes() {
       return {
         id: bg.id,
         label: bg.label,
-        file: `bg/${safeId}.png`,
+        file: `${safeId}.png`,
         status: pngExists ? "generated" : svgExists ? "placeholder" : "missing",
         prompt: null as string | null,
       };
@@ -97,7 +97,7 @@ export function createAssetRoutes() {
         const svgExists = fs.existsSync(path.join(charDiskDir, `${exprSafe}.svg`));
         return {
           expression: expr,
-          file: `char/${safeId}/${exprSafe}.png`,
+          file: `${exprSafe}.png`,
           status: pngExists ? "generated" : svgExists ? "placeholder" : "missing",
           prompt: null as string | null,
         };
@@ -108,7 +108,7 @@ export function createAssetRoutes() {
         const svgExists = fs.existsSync(path.join(charDiskDir, "default.svg"));
         expressions.unshift({
           expression: "default",
-          file: `char/${safeId}/default.png`,
+          file: "default.png",
           status: pngExists ? "generated" : svgExists ? "placeholder" : "missing",
           prompt: null as string | null,
         });
