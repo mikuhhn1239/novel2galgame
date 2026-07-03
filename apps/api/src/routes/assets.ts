@@ -97,7 +97,7 @@ export function createAssetRoutes() {
         const svgExists = fs.existsSync(path.join(charDiskDir, `${exprSafe}.svg`));
         return {
           expression: expr,
-          file: `${exprSafe}.png`,
+          file: `${safeId}/${exprSafe}.png`,
           status: pngExists ? "generated" : svgExists ? "placeholder" : "missing",
           prompt: null as string | null,
         };
@@ -108,7 +108,7 @@ export function createAssetRoutes() {
         const svgExists = fs.existsSync(path.join(charDiskDir, "default.svg"));
         expressions.unshift({
           expression: "default",
-          file: "default.png",
+          file: `${safeId}/default.png`,
           status: pngExists ? "generated" : svgExists ? "placeholder" : "missing",
           prompt: null as string | null,
         });
