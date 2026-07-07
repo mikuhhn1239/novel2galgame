@@ -12,12 +12,26 @@ export interface ModelProfile {
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
+  imageModel?: string;
+  videoModel?: string;
   enabled: boolean;
+}
+
+export interface ModelAssignment {
+  profile: string;
+  model: string;
+}
+
+export interface ModelAssignments {
+  text?: ModelAssignment;
+  image?: ModelAssignment;
+  video?: ModelAssignment;
 }
 
 export interface ModelProfilesConfig {
   profiles: ModelProfile[];
   activeProfile: string;
+  modelAssignments?: ModelAssignments;
 }
 
 const PROFILES_PATH = () => path.join(config.dataDir, "config", "model-profiles.json");
@@ -30,6 +44,8 @@ const DEFAULT_PROFILES: ModelProfilesConfig = {
       baseUrl: "https://apihub.agnes-ai.com/v1",
       apiKey: process.env.OPENAI_API_KEY ?? "",
       defaultModel: process.env.DEFAULT_MODEL ?? "agnes-2.0-flash",
+      imageModel: "agnes-image-2.1-flash",
+      videoModel: "agnes-video-v2.0",
       enabled: true,
     },
     {
@@ -60,4 +76,55 @@ export function writeProfilesConfig(cfg: ModelProfilesConfig) {
 export function getActiveProfile(): ModelProfile | null {
   const cfg = readProfilesConfig();
   return cfg.profiles.find((p) => p.name === cfg.activeProfile) ?? null;
+}
+
+/**
+ * Resolve the effective model config for a given type.
+ * Priority: modelAssignments[type] > activeProfile fields > defaults.
+ */
+export function resolveModelConfig(
+  type: "text" | "image" | "video",
+  cfg?: ModelProfilesConfig
+): ModelAssignment {
+  const c = cfg ?? readProfilesConfig();
+  const active = c.profiles.find((p) => p.name === c.activeProfile);
+  const assignment = c.modelAssignments?.[type];
+
+  if (type === "text") {
+    return {
+      profile: assignment?.profile ?? c.activeProfile,
+      model: assignment?.model ?? active?.defaultModel ?? "gpt-4o",
+    };
+  }
+  if (type === "image") {
+    return {
+      profile: assignment?.profile ?? c.activeProfile,
+      model: assignment?.model ?? active?.imageModel ?? "gpt-image-1",
+    };
+  }
+  // video
+  return {
+    profile: assignment?.profile ?? c.activeProfile,
+    model: assignment?.model ?? active?.videoModel ?? "agnes-video-v2.0",
+  };
+}
+
+/**
+ * Read model assignments. Returns resolved assignments for all three types.
+ * Falls back to activeProfile defaults when file or fields are missing.
+ */
+export function readModelAssignments(): ModelAssignments {
+  const cfg = readProfilesConfig();
+  return {
+    text: resolveModelConfig("text", cfg),
+    image: resolveModelConfig("image", cfg),
+    video: resolveModelConfig("video", cfg),
+  };
+}
+
+/** Save model assignments, merging with existing profiles config. */
+export function writeModelAssignments(assignments: ModelAssignments) {
+  const cfg = readProfilesConfig();
+  cfg.modelAssignments = assignments;
+  writeProfilesConfig(cfg);
 }

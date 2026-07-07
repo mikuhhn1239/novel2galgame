@@ -4,21 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { AgnesVideoProvider } from "@novel2gal/providers";
 import type { VideoProvider, VideoGenerationRequest } from "@novel2gal/providers";
-import { config } from "../config/index.js";
-
-function readModelConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(config.dataDir, "config", "models.json"), "utf-8"));
-  } catch {
-    return { apiKey: "" };
-  }
-}
+import { config, readProfilesConfig, resolveModelConfig } from "../config/index.js";
 
 function createVideoProvider(): VideoProvider | null {
-  const cfg = readModelConfig();
-  const apiKey = cfg.apiKey || process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  return new AgnesVideoProvider({ apiKey, baseUrl: cfg.baseUrl });
+  const cfg = readProfilesConfig();
+  const { profile: profileName } = resolveModelConfig("video", cfg);
+  const profile = cfg.profiles.find((p) => p.name === profileName);
+  if (!profile?.apiKey) return null;
+  return new AgnesVideoProvider({ apiKey: profile.apiKey, baseUrl: profile.baseUrl });
 }
 
 export function createVideoRoutes() {

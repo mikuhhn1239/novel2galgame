@@ -18,6 +18,11 @@ model/
 .vscode/
 .idea/
 
+# SQLite runtime files
+*.db
+*.db-shm
+*.db-wal
+
 # Claude Code local state
 .claude/
 .omc/

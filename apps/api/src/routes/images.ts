@@ -9,34 +9,31 @@ import {
   AgnesImageProvider,
 } from "@novel2gal/providers";
 import type { ImageProvider, ImageGenerationRequest } from "@novel2gal/providers";
-import { config } from "../config/index.js";
-
-function readModelConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(config.dataDir, "config", "models.json"), "utf-8"));
-  } catch {
-    return { apiKey: "", imageModel: "gpt-image-1" };
-  }
-}
+import { config, readProfilesConfig, resolveModelConfig } from "../config/index.js";
 
 function createImageProvider(): ImageProvider | null {
-  const cfg = readModelConfig();
-  const apiKey = cfg.apiKey || process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
+  const cfg = readProfilesConfig();
+  const { profile: profileName, model } = resolveModelConfig("image", cfg);
+  const profile = cfg.profiles.find((p) => p.name === profileName);
+  if (!profile?.apiKey) return null;
 
-  const imageProvider = cfg.imageProvider ?? "openai";
-  switch (imageProvider) {
+  // Determine image provider type from profile name
+  const providerKey = profileName.startsWith("agnes") ? "agnes"
+    : profileName === "zhipu" ? "zhipu"
+    : profileName === "siliconflow" ? "siliconflow"
+    : "openai";
+
+  switch (providerKey) {
     case "zhipu":
-      return new ZhipuImageProvider({ apiKey });
+      return new ZhipuImageProvider({ apiKey: profile.apiKey });
     case "siliconflow":
-      return new SiliconFlowImageProvider({ apiKey, defaultModel: cfg.imageModel });
+      return new SiliconFlowImageProvider({ apiKey: profile.apiKey, defaultModel: model });
     case "agnes":
-      return new AgnesImageProvider({ apiKey, baseUrl: cfg.baseUrl });
-    case "openai":
+      return new AgnesImageProvider({ apiKey: profile.apiKey, baseUrl: profile.baseUrl });
     default:
       return new OpenAIImageProvider({
-        apiKey,
-        baseUrl: cfg.baseUrl || process.env.OPENAI_BASE_URL || undefined,
+        apiKey: profile.apiKey,
+        baseUrl: profile.baseUrl || undefined,
       });
   }
 }

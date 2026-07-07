@@ -8,6 +8,16 @@ import type {
   LLMProviderConfig,
 } from "../../interfaces/llm.js";
 
+/** Skip a DNS name (handling compression pointers per RFC 1035 §4.1.4). Returns new offset. */
+function skipDnsName(msg: Buffer, offset: number): number {
+  while (offset < msg.length && msg[offset] !== 0) {
+    // Compression pointer: top 2 bits set (0xC0)
+    if ((msg[offset] & 0xC0) === 0xC0) return offset + 2;
+    offset += msg[offset] + 1;
+  }
+  return offset + 1; // skip the zero terminator
+}
+
 /** Raw DNS A-record query via UDP to 8.8.8.8 — bypasses system DNS interception (VPN/proxy) */
 function rawDnsQuery(hostname: string, timeoutMs = 3000): Promise<string | null> {
   return new Promise((resolve) => {
@@ -28,24 +38,32 @@ function rawDnsQuery(hostname: string, timeoutMs = 3000): Promise<string | null>
 
       sock.on("message", (msg) => {
         clearTimeout(timer);
-        sock.close();
-        let offset = 12;
-        while (offset < msg.length && msg[offset] !== 0) offset += msg[offset] + 1;
-        offset += 5;
-        for (let i = 0; i < msg.readUInt16BE(6); i++) {
-          offset += 2;
-          const type = msg.readUInt16BE(offset); offset += 2;
+        try {
+          sock.close();
+          let offset = 12;
+          // Skip question section name + QTYPE + QCLASS
+          offset = skipDnsName(msg, offset);
           offset += 4;
-          const rdlen = msg.readUInt16BE(offset); offset += 2;
-          if (type === 1 && rdlen === 4) {
-            resolve(`${msg[offset]}.${msg[offset + 1]}.${msg[offset + 2]}.${msg[offset + 3]}`);
-            return;
+          const ancount = msg.readUInt16BE(6);
+          for (let i = 0; i < ancount; i++) {
+            // Skip answer name (may be a compression pointer — just 2 bytes, or a full name)
+            if (offset + 2 > msg.length) break;
+            if ((msg[offset] & 0xC0) === 0xC0) { offset += 2; }
+            else { offset = skipDnsName(msg, offset); }
+            if (offset + 10 > msg.length) break;
+            const type = msg.readUInt16BE(offset); offset += 2;
+            offset += 4; // CLASS + TTL
+            const rdlen = msg.readUInt16BE(offset); offset += 2;
+            if (type === 1 && rdlen === 4 && offset + 4 <= msg.length) {
+              resolve(`${msg[offset]}.${msg[offset + 1]}.${msg[offset + 2]}.${msg[offset + 3]}`);
+              return;
+            }
+            offset += rdlen;
           }
-          offset += rdlen;
-        }
-        resolve(null);
+          resolve(null);
+        } catch { resolve(null); }
       });
-      sock.on("error", () => { clearTimeout(timer); resolve(null); });
+      sock.on("error", () => { clearTimeout(timer); try { sock.close(); } catch {} resolve(null); });
       sock.send(query, 0, query.length, 53, "8.8.8.8");
     } catch { resolve(null); }
   });
