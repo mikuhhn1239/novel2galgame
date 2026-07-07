@@ -6,6 +6,8 @@
       "baseUrl": "https://apihub.agnes-ai.com/v1",
       "apiKey": "sk-GHpE7ZgoQky5Z3BolfaYRlN6YHONJhfP5prFyHNFfvQlZLkb",
       "defaultModel": "agnes-2.0-flash",
+      "imageModel": "agnes-image-2.1-flash",
+      "videoModel": "agnes-video-v2.0",
       "enabled": true
     },
     {
