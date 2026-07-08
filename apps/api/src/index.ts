@@ -8,8 +8,8 @@ import { FetchLLMProvider } from "@novel2gal/providers";
 import type { LLMProvider } from "@novel2gal/providers";
 import { createServer } from "./server/server.js";
 import { config, getActiveProfile } from "./config/index.js";
-import { EmbeddingService, CharacterStore } from "@novel2gal/rag";
-import { extractCharacterKnowledge } from "@novel2gal/rag";
+import { EmbeddingService, KnowledgeStore } from "@novel2gal/rag";
+import { extractCharacterKnowledge, extractScenePatterns } from "@novel2gal/rag";
 
 const db = createDatabase(config.dataDir);
 
@@ -38,12 +38,12 @@ let rag: any = undefined;
 if (apiKey) {
   try {
     const embedder = new EmbeddingService({ apiKey, baseUrl: activeProfile?.baseUrl });
-    const charStore = new CharacterStore(config.dataDir, embedder);
+    const knowledgeStore = new KnowledgeStore(config.dataDir, embedder, { minScore: 0.6, topK: 5 });
     rag = {
-      characterStore: { search: (q: string, l: number) => charStore.search(q, l), ingest: (c: any[]) => charStore.ingest(c) },
-      extractor: { extractCharacterKnowledge },
+      knowledgeStore,
+      extractor: { extractCharacterKnowledge, extractScenePatterns },
     };
-    console.log("RAG: Character knowledge store ready");
+    console.log("RAG: Knowledge store ready");
   } catch (e) { console.log("RAG: Disabled —", (e as Error).message); }
 }
 

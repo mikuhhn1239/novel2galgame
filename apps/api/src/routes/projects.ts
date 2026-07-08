@@ -44,7 +44,7 @@ const runningPipelines = new Map<string, AbortController>();
 export function createProjectRoutes(
   db: Awaited<ReturnType<typeof createDatabase>>,
   getProvider: () => LLMProvider | null,
-  rag?: { characterStore: { search: (q: string, l: number) => Promise<any[]>; ingest: (chunks: any[]) => Promise<void> }; extractor: { extractCharacterKnowledge: (attr: any, chId: string, chTitle: string) => any[] } },
+  rag?: any,
 ) {
   const router = Router();
   const projectRepo = new ProjectRepository(db);
