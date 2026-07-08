@@ -265,7 +265,7 @@ export async function runChapterPipeline(
   onStageUpdate?: (stage: string) => void,
   flagsDone?: { parsingDone?: boolean; attributionDone?: boolean; segmentationDone?: boolean },
   sceneRepo?: { getById: (id: string) => { mappingStatus?: string; reviewStatus?: string } | null },
-  rag?: { characterStore: { search: (q: string, l: number) => Promise<any[]>; ingest: (chunks: any[]) => Promise<void> }; extractor: { extractCharacterKnowledge: (attr: any, chId: string, chTitle: string) => any[] } },
+  rag?: { knowledgeStore: { searchCharacters: (q: string, l: number) => Promise<any[]>; searchScenePatterns: (q: string, l: number) => Promise<any[]>; listKnownCharacters: () => string[]; ingestCharacters: (c: any[]) => Promise<void>; ingestScenePatterns: (c: any[]) => Promise<void> }; extractor: { extractCharacterKnowledge: (attr: any, chId: string, chTitle: string) => any[]; extractScenePatterns: (seg: any, attr: any, chId: string, chTitle: string) => any } },
 ) {
   const chapterId = existingChapterId ?? `${project.projectId}_chapter_${String(chapterIndex + 1).padStart(4, "0")}`;
   const d = db!; // db is always passed from the route
@@ -287,6 +287,19 @@ export async function runChapterPipeline(
     checkAbort();
     onProgress?.("narrative_parsing", `Parsing chapter ${chapterTitle}`);
     onStageUpdate?.("narrative_parsing");
+
+    // RAG: inject known character names for narrative agent
+    let knownCharacters: any[] | undefined;
+    if (rag) {
+      try {
+        const details = rag.knowledgeStore.listKnownCharacters();
+        if (details.length > 0) {
+          knownCharacters = details.map((name: string) => ({ canonicalName: name }));
+          console.log(`[RAG] Narrative agent: ${details.length} known characters`);
+        }
+      } catch (e) { /* silent */ }
+    }
+
     const narr = resolveAgent(agentModels, "narrative", provider, model);
     const t0 = { prompt: 0, completion: 0 };
     const wNarr = instrumentProvider(narr.provider, (r: any) => { t0.prompt += r.usage?.promptTokens ?? 0; t0.completion += r.usage?.completionTokens ?? 0; });
@@ -317,7 +330,7 @@ export async function runChapterPipeline(
     let characterKnowledge: string | undefined;
     if (rag) {
       try {
-        const results = await rag.characterStore.search(`${chapterTitle} characters`, 5);
+        const results = await rag.knowledgeStore.searchCharacters(`${chapterTitle} characters`, 5);
         if (results.length > 0) {
           characterKnowledge = results.map((c: any) =>
             `角色"${c.canonicalName}"(首次出现: ${c.firstSeenIn}): ${c.appearance?.join("; ") ?? ""}`
@@ -339,7 +352,7 @@ export async function runChapterPipeline(
     if (rag && attributionData) {
       try {
         const chunks = rag.extractor.extractCharacterKnowledge(attributionData, chapterId, chapterTitle);
-        await rag.characterStore.ingest(chunks);
+        await rag.knowledgeStore.ingestCharacters(chunks);
       } catch (e) { /* silent */ }
     }
   }
@@ -353,6 +366,21 @@ export async function runChapterPipeline(
     checkAbort();
     onProgress?.("scene_segmentation", `Segmenting chapter ${chapterTitle}`);
     onStageUpdate?.("segmentation");
+
+    // RAG: search scene patterns from previous chapters
+    let sceneHints: string | undefined;
+    if (rag) {
+      try {
+        const patterns = await rag.knowledgeStore.searchScenePatterns(chapterTitle, 3);
+        if (patterns.length > 0) {
+          sceneHints = patterns.map((p: any) =>
+            `[${p.chapterTitle}] 场景数: ${p.sceneCount}, 地点: ${(p.locationHints ?? []).join(", ")}, 角色分布: ${JSON.stringify(p.characterDistribution ?? {})}`
+          ).join("\n");
+          console.log(`[RAG] Segmentation agent: ${patterns.length} scene patterns`);
+        }
+      } catch (e) { /* silent */ }
+    }
+
     const seg = resolveAgent(agentModels, "segmentation", provider, model);
     const t2 = { prompt: 0, completion: 0 };
     const wSeg = instrumentProvider(seg.provider, (r: any) => { t2.prompt += r.usage?.promptTokens ?? 0; t2.completion += r.usage?.completionTokens ?? 0; });
@@ -391,6 +419,14 @@ export async function runChapterPipeline(
 
   writeSegmentationResult(dataDir, project.projectId, chapterId, segResult);
   onChapterFlags?.(chapterId, { segmentationDone: true });
+
+  // RAG: ingest scene patterns after segmentation
+  if (rag && segResult && attributionData) {
+    try {
+      const sceneChunks = rag.extractor.extractScenePatterns(segResult, attributionData, chapterId, chapterTitle);
+      await rag.knowledgeStore.ingestScenePatterns([sceneChunks]);
+    } catch (e) { /* silent */ }
+  }
 
   // Register scenes in database
   for (let i = 0; i < segResult.scenes.length; i++) {

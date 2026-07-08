@@ -57,14 +57,37 @@ export class VectorStore {
     this.save();
   }
 
-  /** Search by vector, return top-K results sorted by similarity */
-  search(queryVector: number[], limit: number = 5): VectorRecord[] {
+  /** Upsert records — replace existing records with same id, add new ones */
+  upsert(records: VectorRecord[]) {
+    for (const r of records) {
+      const idx = this.records.findIndex((existing) => existing.id === r.id);
+      if (idx >= 0) {
+        this.records[idx] = r; // Replace
+      } else {
+        this.records.push(r);  // Add new
+      }
+    }
+    this.save();
+  }
+
+  /** Search by vector, return top-K with scores */
+  searchWithScore(queryVector: number[], limit: number = 5): { record: VectorRecord; score: number }[] {
     const scored = this.records.map((r) => ({
       record: r,
       score: this.cosineSim(queryVector, r.vector),
     }));
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, limit).map((s) => s.record);
+    return scored.slice(0, limit);
+  }
+
+  /** Search by vector, return top-K results sorted by similarity */
+  search(queryVector: number[], limit: number = 5): VectorRecord[] {
+    return this.searchWithScore(queryVector, limit).map((s) => s.record);
+  }
+
+  /** Get all records */
+  getAll(): VectorRecord[] {
+    return this.records;
   }
 
   /** Delete all records (for reset) */

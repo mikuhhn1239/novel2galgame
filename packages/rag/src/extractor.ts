@@ -1,4 +1,5 @@
 import type { AttributionResult } from "@novel2gal/core";
+import type { ScenePatternKnowledge } from "./knowledge-store.js";
 
 export interface CharacterKnowledge {
   chapterId: string;
@@ -66,4 +67,51 @@ export function extractCharacterKnowledge(
 
   console.log(`[RAG] Extracted ${result.length} character knowledge entries from chapter ${chapterTitle}`);
   return result;
+}
+
+/**
+ * Extract scene pattern knowledge from segmentation + attribution results.
+ * Used by the segmentation agent to reference how scenes were split in previous chapters.
+ */
+export function extractScenePatterns(
+  segResult: any,           // SegmentationResult
+  attributionData: any,     // AttributionResult
+  chapterId: string,
+  chapterTitle: string
+): ScenePatternKnowledge {
+  const locationHints: string[] = [];
+  const charDist: Record<string, number> = {};
+
+  if (segResult?.scenes) {
+    for (const scene of segResult.scenes) {
+      // Collect location hints from scene summaries
+      const loc = scene.summary?.locationHint ?? scene.locationHint;
+      if (loc && !locationHints.includes(loc)) locationHints.push(loc);
+
+      // Track which characters appear in each scene
+      if (scene.unitIds && attributionData?.units) {
+        for (const uid of scene.unitIds) {
+          const unit = attributionData.units.find((u: any) => u.unitId === uid);
+          const speaker = unit?.attribution?.speakerId ?? unit?.speaker;
+          if (speaker) charDist[speaker] = (charDist[speaker] ?? 0) + 1;
+        }
+      }
+    }
+  }
+
+  const embedText = [
+    `章节: ${chapterTitle}`,
+    `场景数: ${segResult?.scenes?.length ?? 0}`,
+    `地点: ${locationHints.join(", ") || "未知"}`,
+    `主要角色: ${Object.entries(charDist).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => `${k}(${v}次)`).join(", ")}`,
+  ].join(" | ");
+
+  return {
+    chapterId,
+    chapterTitle,
+    sceneCount: segResult?.scenes?.length ?? 0,
+    locationHints,
+    characterDistribution: charDist,
+    embedText,
+  };
 }
