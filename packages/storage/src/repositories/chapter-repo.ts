@@ -17,14 +17,16 @@ interface ChapterRow {
   updated_at: string;
 }
 
-function rowToChapter(row: ChapterRow): ChapterState {
+function rowToChapter(row: ChapterRow, db: Database.Database): ChapterState {
+  // Query scenes for this chapter to populate sceneIds
+  const sceneRows = db.prepare("SELECT scene_id FROM scenes WHERE chapter_id = ? ORDER BY scene_index").all(row.chapter_id) as { scene_id: string }[];
   return {
     chapterId: row.chapter_id,
     projectId: row.project_id,
     index: row.chapter_index,
     title: row.title,
     status: row.status as ChapterState["status"],
-    sceneIds: [],
+    sceneIds: sceneRows.map((s) => s.scene_id),
     parsingDone: (row.parsing_done ?? 0) === 1,
     attributionDone: (row.attribution_done ?? 0) === 1,
     segmentationDone: (row.segmentation_done ?? 0) === 1,
@@ -61,14 +63,14 @@ export class ChapterRepository {
     const row = this.db
       .prepare("SELECT * FROM chapters WHERE chapter_id = ?")
       .get(chapterId) as ChapterRow | undefined;
-    return row ? rowToChapter(row) : null;
+    return row ? rowToChapter(row, this.db) : null;
   }
 
   listByProject(projectId: string): ChapterState[] {
     const rows = this.db
       .prepare("SELECT * FROM chapters WHERE project_id = ? ORDER BY chapter_index")
       .all(projectId) as ChapterRow[];
-    return rows.map(rowToChapter);
+    return rows.map((r) => rowToChapter(r, this.db));
   }
 
   updateStatus(chapterId: string, status: ChapterState["status"]): void {
