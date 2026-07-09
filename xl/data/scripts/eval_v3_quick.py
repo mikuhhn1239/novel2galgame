@@ -4,9 +4,9 @@ import json, torch, re, time
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 
-BASE = '/workspace/project-nas-1000073/已移除-用户名/data/checkpoints/stage1-base-sft/final'
-LORA = '/workspace/project-nas-1000073/已移除-用户名/data/checkpoints/stage2-v3'
-DATA = '/workspace/project-nas-1000073/已移除-用户名/data/datasets/training/v3'
+BASE = '/workspace/project-nas-1000073/<your-username>/data/checkpoints/stage1-base-sft/final'
+LORA = '/workspace/project-nas-1000073/<your-username>/data/checkpoints/stage2-v3'
+DATA = '/workspace/project-nas-1000073/<your-username>/data/datasets/training/v3'
 
 def extract_json(text):
     text = text.strip()
