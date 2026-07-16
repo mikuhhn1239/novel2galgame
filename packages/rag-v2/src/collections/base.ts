@@ -149,6 +149,43 @@ export class BaseCollection {
     return filtered.slice(0, options?.topK ?? 5);
   }
 
+  /**
+   * Hybrid search: weighted fusion of vector (cosine) + BM25 keyword scores.
+   * Combines semantic and keyword relevance for better retrieval quality.
+   */
+  hybridSearch(
+    queryVector: number[],
+    queryText: string,
+    limit: number = 5,
+    vectorWeight: number = 0.6,
+  ): SearchResult[] {
+    const vecResults = this.search(queryVector, { topK: limit * 3, minScore: 0 });
+    const kwResults = this.keywordSearch(queryText, limit * 3);
+
+    // Fuse scores by weighted average
+    const kwMap = new Map<string, number>();
+    for (const r of kwResults) {
+      kwMap.set(r.record.id, r.score);
+    }
+
+    const fused = vecResults.map((vr) => {
+      const kwScore = kwMap.get(vr.record.id) ?? 0;
+      const fusedScore = vectorWeight * vr.score + (1 - vectorWeight) * kwScore;
+      return { record: vr.record, score: fusedScore };
+    });
+
+    // Dedup by ID
+    const seen = new Set<string>();
+    const deduped = fused.filter((r) => {
+      if (seen.has(r.record.id)) return false;
+      seen.add(r.record.id);
+      return true;
+    });
+
+    deduped.sort((a, b) => b.score - a.score);
+    return deduped.slice(0, limit);
+  }
+
   // ── BM25 Keyword Search ──────────────────────────────
 
   keywordSearch(query: string, limit: number = 10): SearchResult[] {

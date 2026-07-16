@@ -23,12 +23,15 @@ import type {
 import type { SceneCollection } from "../collections/scenes.js";
 import type { NarrativeCollection } from "../collections/narratives.js";
 import type { PromptCollection } from "../collections/prompts.js";
+import type { TrainingDataCollection } from "../collections/training-data.js";
+import type { TrainingStep } from "../collections/training-data.js";
 
 export interface RAGToolKit {
   characters: CharacterCollection;
   scenes: SceneCollection;
   narratives: NarrativeCollection;
   prompts: PromptCollection;
+  trainingData: TrainingDataCollection;
   embedder: EmbeddingService;
 }
 
@@ -65,7 +68,7 @@ function buildChunkRecord(
  * - prompt engineering: search_prompt_templates to find validated prompts
  */
 export function createRAGTools(kit: RAGToolKit) {
-  const { characters, scenes, narratives, prompts, embedder } = kit;
+  const { characters, scenes, narratives, prompts, trainingData, embedder } = kit;
 
   return [
     // ── Character Search ───────────────────────────────
@@ -288,6 +291,93 @@ export function createRAGTools(kit: RAGToolKit) {
             .record(z.number())
             .describe("角色出现次数"),
           embedText: z.string().describe("用于嵌入的文本"),
+        }),
+      },
+    ),
+
+    // ── Search Training Examples ────────────────────────
+    tool(
+      async ({ query, step, excludeChapterId, minQuality }) => {
+        const queryVector = await embedOne(embedder, query);
+        const results = trainingData.searchFewShotHybrid(
+          queryVector,
+          query,
+          {
+            step: (step as TrainingStep) ?? undefined,
+            topK: 3,
+            excludeChapterId: excludeChapterId ?? undefined,
+            minQuality: minQuality ?? undefined,
+          },
+        );
+        return JSON.stringify(
+          results.map((r) => ({
+            id: r.id,
+            text: r.text.slice(0, 200),
+            label: r.label,
+            step: r.step,
+            quality: r.quality,
+            score: r._score,
+          })),
+        );
+      },
+      {
+        name: "search_training_examples",
+        description:
+          "搜索已标注的训练样本作为少样本示例。用于 LoRA 训练数据生成的上下文学习。",
+        schema: z.object({
+          query: z.string().describe("当前待标注的文本片段"),
+          step: z
+            .enum(["narrative", "scene", "attribution"])
+            .optional()
+            .describe("管线步骤（narrative/scene/attribution）"),
+          excludeChapterId: z
+            .string()
+            .optional()
+            .describe("排除的章节ID，避免使用当前章节样本"),
+          minQuality: z
+            .number()
+            .optional()
+            .describe("最低标注质量阈值 (0-1)"),
+        }),
+      },
+    ),
+
+    // ── Ingest Training Example ─────────────────────────
+    tool(
+      async ({ text, label, step, chapterId, sourceNovelId, quality }) => {
+        const embedText = `${step}: ${text.slice(0, 300)}`;
+        const vectors = await embedder.embed([embedText]);
+        const id = `train_${step}_${chapterId}_${Date.now()}`;
+        trainingData.ingest(
+          [
+            {
+              id,
+              text,
+              label,
+              output: {},
+              step: step as TrainingStep,
+              chapterId,
+              sourceNovelId,
+              embedText,
+              quality,
+            },
+          ],
+          vectors,
+        );
+        return JSON.stringify({ success: true, id });
+      },
+      {
+        name: "ingest_training_example",
+        description: "录入已标注的训练样本。管线每步完成后调用。",
+        schema: z.object({
+          text: z.string().describe("原始文本片段"),
+          label: z.string().describe("管线步骤的输出标签"),
+          step: z
+            .enum(["narrative", "scene", "attribution"])
+            .describe("管线步骤"),
+          chapterId: z.string().describe("来源章节ID"),
+          sourceNovelId: z.string().describe("来源小说ID"),
+          quality: z.number().describe("标注质量 (0-1)"),
         }),
       },
     ),

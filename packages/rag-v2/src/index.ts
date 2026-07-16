@@ -19,6 +19,7 @@ import { CharacterCollection } from "./collections/characters.js";
 import { SceneCollection } from "./collections/scenes.js";
 import { NarrativeCollection } from "./collections/narratives.js";
 import { PromptCollection } from "./collections/prompts.js";
+import { TrainingDataCollection } from "./collections/training-data.js";
 import type { CharacterChunk } from "./chunking/character-chunker.js";
 import type { SceneChunk } from "./chunking/scene-chunker.js";
 
@@ -35,6 +36,7 @@ export interface KnowledgeStoreV2Config {
  * - scenes: scene segmentation patterns
  * - narratives: genre-specific story structures
  * - prompts: validated prompt templates with success tracking
+ * - trainingData: labeled examples for few-shot retrieval in LoRA data generation
  */
 export class KnowledgeStoreV2 {
   readonly collections: {
@@ -42,6 +44,7 @@ export class KnowledgeStoreV2 {
     scenes: SceneCollection;
     narratives: NarrativeCollection;
     prompts: PromptCollection;
+    trainingData: TrainingDataCollection;
   };
 
   readonly embedder: EmbeddingService;
@@ -53,6 +56,7 @@ export class KnowledgeStoreV2 {
       scenes: new SceneCollection(dataDir),
       narratives: new NarrativeCollection(dataDir),
       prompts: new PromptCollection(dataDir),
+      trainingData: new TrainingDataCollection(dataDir),
     };
   }
 
@@ -109,6 +113,9 @@ export type { NarrativePattern } from "./collections/narratives.js";
 
 export { PromptCollection } from "./collections/prompts.js";
 export type { PromptTemplate } from "./collections/prompts.js";
+
+export { TrainingDataCollection } from "./collections/training-data.js";
+export type { TrainingExample, TrainingStep } from "./collections/training-data.js";
 
 // ── Retrieval exports ─────────────────────────────────────
 
