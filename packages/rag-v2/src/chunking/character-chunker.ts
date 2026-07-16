@@ -1,0 +1,146 @@
+﻿/**
+ * Character knowledge chunker.
+ *
+ * Splits character knowledge into semantic chunks for fine-grained retrieval:
+ * - identity: canonical name + aliases
+ * - appearance: physical trait descriptions
+ * - personality: behavior and temperament
+ * - relationships: per-relation data
+ *
+ * v2 upgrade: semantic chunking replaces flat character embedding.
+ */
+
+import type { AttributionResult } from "@novel2gal/core";
+import type { CharacterRecord } from "../collections/characters.js";
+
+export interface CharacterChunk {
+  characterId: string;
+  canonicalName: string;
+  /** Shared source of truth: same literal union as CharacterRecord.chunkType */
+  type: CharacterRecord["chunkType"];
+  /** The chunk text for embedding */
+  text: string;
+  /** Full original text for context window injection */
+  parentText: string;
+  metadata: Record<string, unknown>;
+}
+
+/**
+ * Chunk a single character's knowledge into semantic fragments.
+ */
+function chunkOneCharacter(
+  char: AttributionResult["characters"][number],
+  chapterId: string,
+  chapterTitle: string,
+  units: AttributionResult["units"],
+): CharacterChunk[] {
+  const name = char.canonicalName ?? char.characterId;
+  const chunks: CharacterChunk[] = [];
+
+  // Collect text attributed to this character
+  const attributedTexts: string[] = [];
+  for (const unit of units) {
+    const speaker = (unit as any).speaker ?? (unit as any).characterId;
+    if (speaker === char.characterId) {
+      const text = (unit as any).originalText ?? (unit as any).text ?? "";
+      if (text) attributedTexts.push(text);
+    }
+  }
+
+  const appearanceHints: string[] = [];
+  const relationHints: string[] = [];
+  const personalityHints: string[] = [];
+
+  for (const text of attributedTexts) {
+    if (/穿|裙|发|眼|脸|身|服|装|戴|帽|鞋|裤|镜/.test(text)) {
+      appearanceHints.push(text.slice(0, 120));
+    }
+    if (/同学|友|关系|认识|兄弟|姐妹|父母|师傅|徒弟/.test(text)) {
+      relationHints.push(text.slice(0, 120));
+    }
+    if (/性[格情]|温[柔和]|冷[漠酷]|开[朗]|生[气]|笑|怒|哭|害[羞怕]|骄[傲]|善[良]/.test(text)) {
+      personalityHints.push(text.slice(0, 120));
+    }
+  }
+
+  const baseMeta: Record<string, unknown> = {
+    canonicalName: name,
+    chapterId,
+    firstSeenIn: chapterTitle,
+    allAttributedText: attributedTexts.join("\n"),
+  };
+
+  // 1. Identity chunk
+  chunks.push({
+    characterId: char.characterId,
+    canonicalName: name,
+    type: "identity",
+    text: `角色: ${name}${char.aliases?.length ? ` | 别名: ${char.aliases.join(", ")}` : ""}`,
+    parentText: `角色: ${name}${char.aliases?.length ? ` | 别名: ${char.aliases.join(", ")}` : ""} | 首次出现: ${chapterTitle}`,
+    metadata: { ...baseMeta, aliases: char.aliases ?? [] },
+  });
+
+  // 2. Appearance chunk
+  if (appearanceHints.length > 0) {
+    chunks.push({
+      characterId: char.characterId,
+      canonicalName: name,
+      type: "appearance",
+      text: `角色: ${name} | 外观: ${appearanceHints.join("; ")}`,
+      parentText: `角色: ${name} 的外观特征:\n${appearanceHints.join("\n")}`,
+      metadata: { ...baseMeta, traitKind: "appearance", traitCount: appearanceHints.length },
+    });
+  }
+
+  // 3. Personality chunk
+  if (personalityHints.length > 0) {
+    chunks.push({
+      characterId: char.characterId,
+      canonicalName: name,
+      type: "personality",
+      text: `角色: ${name} | 性格: ${personalityHints.join("; ")}`,
+      parentText: `角色: ${name} 的性格特征:\n${personalityHints.join("\n")}`,
+      metadata: { ...baseMeta, traitKind: "personality", traitCount: personalityHints.length },
+    });
+  }
+
+  // 4. Relationship chunks (one per relationship)
+  for (const relText of relationHints) {
+    chunks.push({
+      characterId: char.characterId,
+      canonicalName: name,
+      type: "relationship",
+      text: `角色: ${name} | 关系: ${relText}`,
+      parentText: `角色: ${name} 的关系:\n${relText}`,
+      metadata: { ...baseMeta, traitKind: "relationship", relationText: relText },
+    });
+  }
+
+  return chunks;
+}
+
+/**
+ * Extract character knowledge from attribution results into semantic chunks.
+ */
+export function chunkCharacterKnowledge(
+  attributionData: AttributionResult,
+  chapterId: string,
+  chapterTitle: string,
+): CharacterChunk[] {
+  const allChunks: CharacterChunk[] = [];
+
+  for (const char of attributionData.characters) {
+    const charChunks = chunkOneCharacter(
+      char,
+      chapterId,
+      chapterTitle,
+      attributionData.units,
+    );
+    allChunks.push(...charChunks);
+  }
+
+  console.log(
+    `[RAG-v2] Chunked ${allChunks.length} character knowledge chunks from chapter "${chapterTitle}"`,
+  );
+  return allChunks;
+}

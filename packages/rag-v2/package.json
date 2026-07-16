@@ -1,0 +1,29 @@
+{
+  "name": "@novel2gal/rag-v2",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tools": "./src/tools/index.ts",
+    "./collections/*": "./src/collections/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@novel2gal/core": "workspace:*",
+    "@novel2gal/providers": "workspace:*",
+    "@novel2gal/rag": "workspace:*",
+    "@langchain/core": "^0.3.0",
+    "@xenova/transformers": "^2.17.0",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.6.0"
+  }
+}
