@@ -31,6 +31,7 @@ import { runStructureAgent, runConsistencyReviewAgent } from "@novel2gal/agents"
 import type { ChapterConsistencyData } from "@novel2gal/agents";
 import { runChapterPipeline, createDefaultConfig } from "../orchestrator/index.js";
 import type { AgentModelConfig } from "../orchestrator/chapter-pipeline.js";
+import { buildChapterPipelineGraph, buildSupervisoryPipelineGraph } from "@novel2gal/pipeline";
 import { config } from "../config/index.js";
 import { FetchLLMProvider } from "@novel2gal/providers";
 import type { LLMProvider } from "@novel2gal/providers";
@@ -322,39 +323,54 @@ export function createProjectRoutes(
     // Return immediately, run pipeline in background
     res.json({ chapterId: cid, status: "started", message: "管线已启动" });
 
-    // Run pipeline asynchronously
-    runChapterPipeline(
-      config.dataDir, project, chapter.index, chapter.title, chapterText, provider, model,
-      (stage, message) => {
+    // Run LangGraph pipeline asynchronously
+    const graphEngine: string = req.body.graphEngine ?? "flat";
+    const graph = graphEngine === "supervisory"
+      ? buildSupervisoryPipelineGraph()
+      : buildChapterPipelineGraph();
+    const initialState = {
+      projectId: pid,
+      chapterId: cid,
+      chapterTitle: chapter.title,
+      chapterText,
+      dataDir: config.dataDir,
+      provider,
+      defaultModel: model,
+      modelConfig: agentModels ?? {},
+      signal: ac.signal,
+      db,
+      sceneRepo,
+      autoRunVisualPrompt: project.config.autoRunVisualPrompt ?? false,
+      onProgress: (stage: string, message: string) => {
         broadcastProgress({ projectId: pid, chapterId: cid, stage, status: "progress", message });
       },
-      agentModels,
-      (scene, sceneIndex) => { try { sceneRepo.create(scene, sceneIndex); } catch {} },
-      cid,
-      (chId, flags) => { try { chapterRepo.updateFlags(chId, flags); } catch {} },
-      ac.signal,
-      db,
-      (stage) => {
-        // Update pipeline_run current_stage
-        db.prepare("UPDATE pipeline_runs SET current_stage=? WHERE run_id=?").run(stage, runId);
+      onChapterFlags: (chId: string, flags: any) => {
+        try { chapterRepo.updateFlags(chId, flags); } catch {}
       },
-      { parsingDone: chapter.parsingDone, attributionDone: chapter.attributionDone, segmentationDone: chapter.segmentationDone },
-      sceneRepo,
-      rag,
-    ).then((result) => {
+      onSceneCreated: (scene: any, idx: number) => {
+        try { sceneRepo.create(scene, idx); } catch {}
+      },
+    };
+
+    // Stream graph execution
+    graph.invoke(initialState, {
+      configurable: { thread_id: `${pid}_${cid}`, rag },
+      signal: ac.signal,
+    }).then((finalState: any) => {
+      const sceneCount = finalState?.segmentationResult?.scenes?.length ?? 0;
       broadcastProgress({ projectId: pid, chapterId: cid, stage: "completed", status: "completed" });
       chapterRepo.updateStatus(cid, "chapter_ready");
       db.prepare("UPDATE pipeline_runs SET status='completed', finished_at=? WHERE run_id=?")
         .run(now(), runId);
-      console.log(`[Pipeline] ${cid} completed: ${result.sceneCount} scenes`);
-    }).catch((err) => {
-      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[LangGraph] ${cid} completed: ${sceneCount} scenes`);
+    }).catch((err: any) => {
+      const msg = err?.message ?? String(err);
       const isCancelled = msg.includes("ABORTED");
       broadcastProgress({ projectId: pid, chapterId: cid, stage: "failed", status: "failed", message: msg });
       chapterRepo.updateStatus(cid, isCancelled ? "cancelled" : "failed");
       db.prepare("UPDATE pipeline_runs SET status=?, finished_at=?, error_message=? WHERE run_id=?")
         .run(isCancelled ? "cancelled" : "failed", now(), msg.slice(0, 500), runId);
-      console.error(`[Pipeline] ${cid} ${isCancelled ? "cancelled" : "failed"}:`, msg);
+      console.error(`[LangGraph] ${cid} ${isCancelled ? "cancelled" : "failed"}:`, msg);
     }).finally(() => {
       runningPipelines.delete(cid);
     });

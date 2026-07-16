@@ -23,3 +23,7 @@ export { debateAttribution, detectAmbiguity } from "./collaboration/debate.js";
 export type { DebateOpinion, DebateResult } from "./collaboration/debate.js";
 export { assessComplexity, getDifficultyConfig } from "./collaboration/difficulty-router.js";
 export type { Difficulty } from "./collaboration/difficulty-router.js";
+
+// Memory
+export { DecisionMemoryStore } from "./memory/decision-store.js";
+export type { DecisionMemory, MemoryHit, StoreItem } from "./memory/decision-store.js";
